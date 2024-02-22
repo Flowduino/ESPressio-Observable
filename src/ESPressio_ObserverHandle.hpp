@@ -14,24 +14,25 @@ namespace ESPressio {
             public:
                 ObserverHandle(IObservable* observable, IObserver* observer) : _observable(observable), _observer(observer) {}
 
-                ~ObserverHandle() {
+                ~ObserverHandle() override {
                     Unregister();
                 }
 
-                virtual void __invalidate() {
+                void __invalidate() {
                     _observable = nullptr;
                 }
 
-                virtual void Unregister() {
+                void Unregister() override {
                     if (_observable == nullptr) { return; }
                     _observable->UnregisterObserver(_observer);
+                    __invalidate();
                 }
 
-                virtual IObservable* GetObservable() {
+                IObservable* GetObservable() override {
                     return _observable;
                 }
 
-                virtual IObserver* GetObserver() {
+                IObserver* GetObserver() override {
                     return _observer;
                 }
         };

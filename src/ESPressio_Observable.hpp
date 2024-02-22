@@ -44,12 +44,13 @@ namespace ESPressio {
                     }
                     IObserverHandle* handle = new ObserverHandle(this, observer);
                     _observers.push_back(handle);
+                    return handle;
                 }
 
                 virtual void UnregisterObserver(IObserver* observer) {
                     for (auto thisObserver = _observers.begin(); thisObserver != _observers.end(); thisObserver++) {
                         if ((*thisObserver)->GetObserver() == observer) {
-                            (*thisObserver)->Unregister();
+                            static_cast<ObserverHandle*>((*thisObserver))->__invalidate();
                             _observers.erase(thisObserver);
                             return;
                         }
