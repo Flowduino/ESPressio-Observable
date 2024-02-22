@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "ESPressio_IObservable.hpp"
+#include "ESPressio_IObserver.hpp"
 
 namespace ESPressio {
 
@@ -11,11 +12,11 @@ namespace ESPressio {
    
         class Observable : public IObservable {
             private:
-                std::vector<void*> observers;
+                std::vector<IObserver*> _observers;
             protected:
                 /// Will call the `callback` for each Observer
-                virtual void WithObservers(std::function<void(void*)> callback) {
-                    for (auto observer : observers) {
+                virtual void WithObservers(std::function<void(IObserver*)> callback) {
+                    for (auto observer : _observers) {
                         callback(observer);
                     }
                 }
@@ -23,29 +24,29 @@ namespace ESPressio {
                 /// Will call the `callback` for each Observer that is of type `ObserverType`
                 template <class ObserverType>
                 void WithObservers(std::function<void(ObserverType*)> callback) {
-                    for (auto observer : observers) {
+                    for (auto observer : _observers) {
                         ObserverType* observerAsT = dynamic_cast<ObserverType*>(observer);
                         if (!observerAsT) { continue; }
                         callback(observerAsT);
                     }
                 }
             public:
-                virtual void RegisterObserver(void* observer) {
+                virtual void RegisterObserver(IObserver* observer) {
                     if (IsObserverRegistered(observer)) { return; }
-                    observers.push_back(observer);
+                    _observers.push_back(observer);
                 }
 
-                virtual void UnregisterObserver(void* observer) {
-                    for (auto thisObserver = observers.begin(); thisObserver != observers.end(); thisObserver++) {
+                virtual void UnregisterObserver(IObserver* observer) {
+                    for (auto thisObserver = _observers.begin(); thisObserver != _observers.end(); thisObserver++) {
                         if (*thisObserver == observer) {
-                            observers.erase(thisObserver);
+                            _observers.erase(thisObserver);
                             return;
                         }
                     }
                 }
 
-                virtual bool IsObserverRegistered(void* observer) {
-                    for (auto thisObserver : observers) {
+                virtual bool IsObserverRegistered(IObserver* observer) {
+                    for (auto thisObserver : _observers) {
                         if (thisObserver == observer) { return true; }
                     }
                     return false;

@@ -3,6 +3,8 @@
 #include <functional>
 #include <memory>
 
+#include "ESPressio_IObserver.hpp"
+
 namespace ESPressio {
 
     namespace Observable {
@@ -20,12 +22,12 @@ namespace ESPressio {
     
         class IObservable : public std::enable_shared_from_this<IObservable> {
             public:
-                /// Will Register the `void*` (Pointer to an Observer Object) with this `IObservable`
-                virtual void RegisterObserver(void* observer) = 0;
-                /// Will Unregister the `void*` (Pointer to an Observer Object) from this `IObservable`
-                virtual void UnregisterObserver(void* observer) = 0;
-                /// Will return `true` if the `void*` (Pointer to an Observer Object) is registered with this `IObservable`
-                virtual bool IsObserverRegistered(void* observer) = 0;
+                /// Will Register the`IObserver` with this `IObservable`
+                virtual void RegisterObserver(IObserver* observer) = 0;
+                /// Will Unregister the `IObserver` from this `IObservable`
+                virtual void UnregisterObserver(IObserver* observer) = 0;
+                /// Will return `true` if the `IObserver` is registered with this `IObservable`
+                virtual bool IsObserverRegistered(IObserver* observer) = 0;
         };
 
     }
