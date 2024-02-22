@@ -5,7 +5,7 @@
 
 #include "ESPressio_IObservable.hpp"
 #include "ESPressio_IObserver.hpp"
-#include "ESPressio_Observer.hpp"
+#include "ESPressio_ObserverHandle.hpp"
 
 namespace ESPressio {
 
