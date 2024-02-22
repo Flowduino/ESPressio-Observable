@@ -13,12 +13,12 @@ namespace ESPressio {
    
         class Observable : public IObservable {
             private:
-                std::vector<IObserver*> _observers;
+                std::vector<IObserverHandle*> _observers;
             protected:
                 /// Will call the `callback` for each Observer
                 virtual void WithObservers(std::function<void(IObserver*)> callback) {
                     for (auto observer : _observers) {
-                        callback(observer);
+                        callback(observer->GetObserver());
                     }
                 }
 
@@ -26,23 +26,30 @@ namespace ESPressio {
                 template <class ObserverType>
                 void WithObservers(std::function<void(ObserverType*)> callback) {
                     for (auto observer : _observers) {
-                        ObserverType* observerAsT = dynamic_cast<ObserverType*>(observer);
+                        ObserverType* observerAsT = dynamic_cast<ObserverType*>(observer->GetObserver());
                         if (!observerAsT) { continue; }
                         callback(observerAsT);
                     }
                 }
             public:
+                ~Observable() {
+                    for (auto observer : _observers) {
+                        observer->__invalidate();
+                    }
+                }
+
                 virtual IObserverHandle* RegisterObserver(IObserver* observer) {
                     for (auto thisObserver : _observers) {
-                        if (thisObserver == observer) { return new ObserverHandle(this, observer); }
+                        if (thisObserver->GetObserver() == observer) { return thisObserver; }
                     }
-                    _observers.push_back(observer);
-                    return new ObserverHandle(this, observer);
+                    IObserverHandle* handle = new ObserverHandle(this, observer);
+                    _observers.push_back(handle);
                 }
 
                 virtual void UnregisterObserver(IObserver* observer) {
                     for (auto thisObserver = _observers.begin(); thisObserver != _observers.end(); thisObserver++) {
-                        if (*thisObserver == observer) {
+                        if ((*thisObserver)->GetObserver() == observer) {
+                            (*thisObserver)->Unregister();
                             _observers.erase(thisObserver);
                             return;
                         }
@@ -51,7 +58,7 @@ namespace ESPressio {
 
                 virtual bool IsObserverRegistered(IObserver* observer) {
                     for (auto thisObserver : _observers) {
-                        if (thisObserver == observer) { return true; }
+                        if ((*thisObserver).GetObserver() == observer) { return true; }
                     }
                     return false;
                 }
