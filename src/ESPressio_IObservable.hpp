@@ -18,8 +18,8 @@ namespace ESPressio {
                 virtual void Unregister() = 0;
                 /// Will return a `weak_ptr` to the `IObservable`
                 virtual std::weak_ptr<IObservable> GetObservable() = 0;
-                /// Will return a `weak_ptr` to the `IObserver`
-                virtual std::weak_ptr<IObserver> GetObserver() = 0;
+                /// Will return a pointer to the `IObserver`
+                virtual IObserver* GetObserver() = 0;
         };
     
         class IObservable : public std::enable_shared_from_this<IObservable> {
