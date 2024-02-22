@@ -20,6 +20,7 @@ namespace ESPressio {
                 virtual IObserver* GetObserver() = 0;
         };
     
+        /// An `IObservable` is an object that can be observed by any number of `IObserver` descendant types
         class IObservable {
             public:
                 virtual ~IObservable() = default;
