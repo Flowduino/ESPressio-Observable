@@ -5,6 +5,7 @@
 
 #include "ESPressio_IObservable.hpp"
 #include "ESPressio_IObserver.hpp"
+#include "ESPressio_Observer.hpp"
 
 namespace ESPressio {
 
@@ -31,9 +32,12 @@ namespace ESPressio {
                     }
                 }
             public:
-                virtual void RegisterObserver(IObserver* observer) {
-                    if (IsObserverRegistered(observer)) { return; }
+                virtual IObserverHandle* RegisterObserver(IObserver* observer) {
+                    for (auto thisObserver : _observers) {
+                        if (thisObserver == observer) { return new ObserverHandle(this, observer); }
+                    }
                     _observers.push_back(observer);
+                    return new ObserverHandle(this, observer);
                 }
 
                 virtual void UnregisterObserver(IObserver* observer) {
