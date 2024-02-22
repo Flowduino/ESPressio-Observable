@@ -34,7 +34,7 @@ namespace ESPressio {
             public:
                 ~Observable() {
                     for (auto observer : _observers) {
-                        observer->__invalidate();
+                        static_cast<ObserverHandle*>(observer)->__invalidate();
                     }
                 }
 

@@ -14,9 +14,6 @@ namespace ESPressio {
         /// It is used to not only check if the `IObservable` still exists, but also to unregister the Observer when desired!
         class IObserverHandle {
             public:
-                /// Will null the `IObservable` reference to inform that the Observable is no longer valid
-                /// Do not call this method directly, it is called by the `IObservable` when it is destroyed
-                virtual void __invalidate() = 0;
                 /// Will Unregister this Observer from the `IObservable` if it still exists
                 virtual void Unregister() = 0;
                 /// Will return a `weak_ptr` to the `IObservable`
