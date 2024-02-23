@@ -20,7 +20,7 @@ namespace ESPressio {
                 std::vector<IObserverHandle*> _observers;
             protected:
                 /// Will call the `callback` for each Observer
-                virtual void WithObservers(std::function<void(IObserver*)> callback) {
+                void WithObservers(std::function<void(IObserver*)> callback) {
                     for (auto observer : _observers) {
                         callback(observer->GetObserver());
                     }
