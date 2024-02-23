@@ -45,13 +45,17 @@ The namespace provides the following (*click on any declaration to navigate to m
 You can quickly and easily add this library to your project in PlatformIO by simply including the following in your `platformio.ini` file:
 
 ```ini
+lib_deps =
+    flowduino/ESPressio-Observable@^1.0.0
+```
+
+Alternatively, if you want to use the bleeding-edge (effectively "Developer Integration Testing" or "DIT") sources, you can instead use:
+
+```ini
 lib_deps = 
     https://github.com/Flowduino/ESPressio-Observable.git
 ```
-
 Please note that this will use the very latest commits pushed into the repository, so volatility is possible.
-This will of course be resolved when the first release version is tagged and published.
-This section of the README will be updated concurrently with each release.
 
 ## RTTI is required for this library!
 This library leverages fundamnetal C++ language features that in turn necessitate the use of RTTI (**R**un**T**ime **T**ype **I**nformation).
