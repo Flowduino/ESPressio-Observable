@@ -4,7 +4,7 @@
     "keywords": "observer,observable,observation,observer pattern,pattern,design pattern,callback,watcher,notifier,espressio",
     "authors": {
         "name": "Flowduino",
-        "maintainer": true
+        "maintainer": true,
         "url": "https://flowduino.com"
     },
     "repository": {
