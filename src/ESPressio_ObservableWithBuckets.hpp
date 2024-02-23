@@ -1,5 +1,23 @@
 #ifndef ESPRESSIO_OBSERVABLE_EXPERIMENTAL
     #error This implementation is not yet complete. Please check back later for updates.
+    /*
+        NOTES:
+        - This is an experimental attempt to make a Bucketed Observerable Type.
+        - Due to language limitations in C++, what I'm attempting to achieve here may not be possible in any elegant way.
+        - It is entirely possible that this implementation may be scrapped later, which is why it is marked with this error.
+        
+        ISSUES:
+        - Because each Observer type can inherit from multiple `IObserver` descendant types, registration of a single
+            Observer with multiple `IObserver` descendant types can lead to undefined behavior. This is because the
+            code cannot determine which `IObserver` type or types are applicable for that singular Observer object.
+        - This is a limitation of the C++ language, and is not something that can be easily worked around.
+
+        WORKAROUNDS:
+        - Use the `Observable` or `ThreadSafeObservable` classes instead. They are fully functional and have no known issues.
+            They use a Dynamic Cast method to determine whether each given Observer satisfies a specific `IObserver` descendant type.
+            This is the only known way to achieve this functionality in C++ (for now)
+
+    */
 #endif
 
 #pragma once
