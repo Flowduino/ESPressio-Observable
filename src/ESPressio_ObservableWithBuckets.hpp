@@ -35,7 +35,7 @@ namespace ESPressio {
                     if (observers == nullptr || observers->empty()) { return; } // If there are no Observers, return
 
                     for (auto observer : *observers) { // For each Observer...
-                        callback(observer); // ...call the callback (we know that it is of type `ObserverType`)
+                        callback(observer->GetObserver()); // ...call the callback (we know that it is of type `ObserverType`)
                     }
                 }
             public:
