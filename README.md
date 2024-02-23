@@ -4,7 +4,7 @@ Observer Pattern Components of the Flowduino ESPressio Development Platform
 Provides a foundation for designing, structuring, and implementing your embedded programs using Observer Pattern.
 
 ## Latest Stable Version
-There is currently no stable released version.
+The latest Stable Version is [1.0.1](https://github.com/Flowduino/ESPressio-Observable/releases/tag/1.0.1).
 
 ## ESPressio Development Platform
 The **ESPressio** Development Platform is a collection of discrete (sometimes intra-connected) Component Libraries developed with a particular development ethos in mind.
