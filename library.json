@@ -1,10 +1,11 @@
 {
-    "name": "Flowduino ESPressio-Observable",
+    "name": "ESPressio-Observable",
     "description": "Observer-Pattern Library intended for use with all microcontrollers",
     "keywords": "observer,observable,observation,observer pattern,pattern,design pattern,callback,watcher,notifier,espressio",
     "authors": {
         "name": "Flowduino",
         "maintainer": true
+        "url": "https://flowduino.com"
     },
     "repository": {
         "type": "git",
