@@ -12,7 +12,8 @@ namespace ESPressio {
     namespace Observable {
    
         /// An `Observable` is an object that can be observed by any number of `IObserver` descendant types
-        /// This is a concrete implementation of `IObservable`, but it is NOT Thread-Safe.
+        /// This is a concrete implementation of `IObservable`.
+        /// THIS TYPE IS NOT THREAD-SAFE!
         /// Registering or Unregistering Observers while Observers are being notified can lead to undefined behavior.
         /// If you need a Thread-Safe Implementation, use the `ThreadSafeObservable` class instead.
         class Observable : public IObservable {
