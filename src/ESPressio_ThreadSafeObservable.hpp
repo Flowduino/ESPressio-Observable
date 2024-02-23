@@ -29,14 +29,6 @@ namespace ESPressio {
             protected:
                 /// Will call the `callback` for each Observer
                 virtual void WithObservers(std::function<void(IObserver*)> callback) {
-                    // _mutex.lock();
-                    // std::vector<IObserverHandle*> observers;
-                    // observers.reserve(_observers.size());
-                    // for (auto observer : _observers) {
-                    //     observers.push_back(observer);
-                    // }
-                    // _mutex.unlock();
-
                     std::vector<IObserverHandle*>* observers = CopyObservers();
                     for (auto observer : *observers) {
                         callback(observer->GetObserver());
