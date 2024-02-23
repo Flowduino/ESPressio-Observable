@@ -1,3 +1,7 @@
+#ifndef ESPRESSIO_OBSERVABLE_EXPERIMENTAL
+    #error This implementation is not yet complete. Please check back later for updates.
+#endif
+
 #pragma once
 
 #include <functional>
