@@ -12,7 +12,10 @@ namespace ESPressio {
 
     namespace Observable {
         class IObservable;
+        class Observable;
+        class ObservableWithBuckets;
         class ObserverHandle;
+        class ThreadSafeObservable;
 
         class ObservableException : public std::runtime_error {
             public:
@@ -49,6 +52,18 @@ namespace ESPressio {
                 ObserverRegistrationConflictException()
                     : ObserverRegistrationException(
                         "Observer is already registered with a different interface set") {}
+        };
+
+        class ObserverHandleException : public ObservableException {
+            public:
+                using ObservableException::ObservableException;
+        };
+
+        class InvalidObservableHandleException : public ObserverHandleException {
+            public:
+                InvalidObservableHandleException()
+                    : ObserverHandleException(
+                        "Cannot construct an Observer Handle without a valid Observable lifetime") {}
         };
 
         namespace Detail {
@@ -109,7 +124,8 @@ namespace ESPressio {
                 /// Returns the associated `IObservable`, or nullptr once it has begun destruction.
                 /// The returned pointer is non-owning and must not be retained.
                 virtual IObservable* GetObservable() = 0;
-                /// Will return a pointer to the `IObserver`
+                /// Returns the non-owning `IObserver` pointer while registered,
+                /// or nullptr after unregistration has begun.
                 virtual IObserver* GetObserver() = 0;
         };
     
@@ -124,8 +140,10 @@ namespace ESPressio {
                     return _lifetimeControl;
                 }
 
-                /// Derived destructors must invoke this before destroying state used by
-                /// RegisterObserver(), UnregisterObserver(), or IsObserverRegistered().
+                /// Any derived type whose state is used by registration methods must
+                /// invoke this at the start of its most-derived destructor, before
+                /// destroying or locking that state. This includes types derived from
+                /// a concrete Observable implementation when they override those methods.
                 void BeginObservableDestruction() noexcept {
                     _lifetimeControl->InvalidateAndWait();
                 }

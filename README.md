@@ -249,9 +249,11 @@ Passing `nullptr` to `RegisterObserver` throws `InvalidObserverRegistrationExcep
 Invoking `delete observerHandle` will not only destroy the Observer Handle (freeing its memory), it will also unregister the `Observer` from the `Observable`.
 In the case of the above (simple) example, both the `Observer` and the `Observable` exist for the entire lifetime of execution, however - you can fully control the lifetimes in your applications.
 
+`IObserverHandle::GetObserver()` returns the registered, non-owning Observer pointer while the registration is active and returns `nullptr` once unregistration begins. Constructing an `ObserverHandle` directly without a valid Observable lifetime throws `InvalidObservableHandleException`, derived from `ObserverHandleException` and `ObservableException`.
+
 An Observer Handle may safely outlive its Observable. Internally, handles share a small lifetime-control object with the Observable, but the public API remains the non-owning `IObserverHandle*` API. Once Observable destruction begins, `GetObservable()` returns `nullptr` and deleting or unregistering a surviving handle is safe. The raw pointer returned by `GetObservable()` is only an immediate, non-owning observation and must not be retained or used concurrently with Observable destruction.
 
-Custom classes derived directly from `IObservable` must call the protected `BeginObservableDestruction()` method at the beginning of their destructor, before destroying or locking any state used by their registration methods. The base destructor calls it again safely as a fallback, but that later call alone cannot protect state already destroyed by a derived destructor.
+Any derived class whose own state is used by `RegisterObserver()`, `UnregisterObserver()`, or `IsObserverRegistered()` must call the protected `BeginObservableDestruction()` method at the beginning of its most-derived destructor, before destroying or locking that state. This includes classes derived from `Observable` or `ThreadSafeObservable` when they override those methods. The base destructor calls it again safely as a fallback, but that later call alone cannot protect state already destroyed by an earlier derived destructor.
 
 ### Remember: You can have as many `Observer`s as you want for a single `Observable`!
 As this section title says, you can register as many `Observer`s as you require for any `Observable` type.
@@ -519,7 +521,7 @@ class MyDisplay : public IObserver, public ITemperatureObserver, public IAirPres
         }
 
         void OnTemperatureDecreased(int decreasedBy) override {
-            _lastTemperatureChange = -decreasedBy // Gives us a negative number to render
+            _lastTemperatureChange = -decreasedBy; // Gives us a negative number to render
             Redraw();
         }
 

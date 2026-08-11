@@ -12,17 +12,53 @@ namespace ESPressio {
 
         class ObserverHandle : public IObserverHandle {
             private:
+                friend class Observable;
+                friend class ObservableWithBuckets;
+                friend class ThreadSafeObservable;
+
                 std::shared_ptr<Detail::ObservableLifetimeControl> _lifetimeControl;
-                IObserver* _observer;
+                std::atomic<IObserver*> _observer;
                 std::atomic<bool> _registered{true};
+
+                static std::shared_ptr<Detail::ObservableLifetimeControl>
+                GetValidatedLifetimeControl(IObservable* observable) {
+                    if (observable == nullptr) {
+                        throw InvalidObservableHandleException();
+                    }
+                    return observable->GetLifetimeControl();
+                }
+
+                static std::shared_ptr<Detail::ObservableLifetimeControl>
+                GetValidatedLifetimeControl(
+                    std::shared_ptr<Detail::ObservableLifetimeControl> lifetimeControl) {
+                    if (!lifetimeControl) {
+                        throw InvalidObservableHandleException();
+                    }
+                    return lifetimeControl;
+                }
+
+                static IObserver* GetValidatedObserver(IObserver* observer) {
+                    if (observer == nullptr) {
+                        throw InvalidObserverRegistrationException();
+                    }
+                    return observer;
+                }
+
+                void InvalidateRegistration() noexcept {
+                    _registered.store(false);
+                    _observer.store(nullptr);
+                }
+
             public:
                 ObserverHandle(IObservable* observable, IObserver* observer)
-                    : ObserverHandle(observable->GetLifetimeControl(), observer) {}
+                    : ObserverHandle(GetValidatedLifetimeControl(observable), observer) {}
 
                 ObserverHandle(
                     std::shared_ptr<Detail::ObservableLifetimeControl> lifetimeControl,
                     IObserver* observer)
-                    : _lifetimeControl(std::move(lifetimeControl)), _observer(observer) {}
+                    : _lifetimeControl(
+                        GetValidatedLifetimeControl(std::move(lifetimeControl))),
+                      _observer(GetValidatedObserver(observer)) {}
 
                 ObserverHandle(const ObserverHandle&) = delete;
                 ObserverHandle& operator=(const ObserverHandle&) = delete;
@@ -38,24 +74,26 @@ namespace ESPressio {
                     }
                 }
 
-                void __invalidate() noexcept {
-                    _registered.store(false);
-                }
-
                 void Unregister() override {
+                    IObserver* observer = _observer.load();
                     if (!_registered.exchange(false)) { return; }
 
                     IObservable* observable = _lifetimeControl->Acquire();
-                    if (observable == nullptr) { return; }
+                    if (observable == nullptr) {
+                        _observer.store(nullptr);
+                        return;
+                    }
 
                     try {
-                        observable->UnregisterObserver(_observer);
+                        observable->UnregisterObserver(observer);
                     } catch (...) {
                         _lifetimeControl->Release();
+                        _observer.store(observer);
                         _registered.store(true);
                         throw;
                     }
                     _lifetimeControl->Release();
+                    _observer.store(nullptr);
                 }
 
                 IObservable* GetObservable() override {
@@ -64,7 +102,7 @@ namespace ESPressio {
                 }
 
                 IObserver* GetObserver() override {
-                    return _observer;
+                    return _observer.load();
                 }
         };
 

@@ -99,7 +99,7 @@ namespace ESPressio {
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
                     for (auto thisObserver = _observers.begin(); thisObserver != _observers.end(); thisObserver++) {
                         if ((*thisObserver)->GetObserver() == observer) {
-                            static_cast<ObserverHandle*>((*thisObserver))->__invalidate();
+                            static_cast<ObserverHandle*>((*thisObserver))->InvalidateRegistration();
                             _observers.erase(thisObserver);
                             return;
                         }

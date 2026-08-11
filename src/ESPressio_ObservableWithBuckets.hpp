@@ -229,7 +229,7 @@ namespace ESPressio {
                     const auto registration = _registrations.find(observer);
                     if (registration == _registrations.end()) { return; }
 
-                    registration->second.handle->__invalidate();
+                    registration->second.handle->InvalidateRegistration();
                     _removeFromBuckets(registration->second);
                     _registrations.erase(registration);
                 }
