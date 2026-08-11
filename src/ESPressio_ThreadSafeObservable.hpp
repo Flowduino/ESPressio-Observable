@@ -1,8 +1,9 @@
 #pragma once
 
 #include <functional>
-#include <vector>
+#include <memory>
 #include <mutex>
+#include <vector>
 
 #include "ESPressio_IObservable.hpp"
 #include "ESPressio_IObserver.hpp"
@@ -18,86 +19,96 @@ namespace ESPressio {
         class ThreadSafeObservable : public IObservable {
             private:
                 std::vector<IObserverHandle*> _observers;
-                std::mutex _mutex;
+                std::recursive_mutex _mutex;
 
-                std::vector<IObserverHandle*>* CopyObservers() {
-                    _mutex.lock();
-                    std::vector<IObserverHandle*>* observers = new std::vector<IObserverHandle*>(_observers);
-                    _mutex.unlock();
+                bool _isObserverRegistered(IObserver* observer) const {
+                    for (IObserverHandle* handle : _observers) {
+                        if (handle->GetObserver() == observer) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
+                std::vector<IObserver*> _copyObserverPointers() const {
+                    std::vector<IObserver*> observers;
+                    observers.reserve(_observers.size());
+
+                    for (IObserverHandle* handle : _observers) {
+                        observers.push_back(handle->GetObserver());
+                    }
+
                     return observers;
                 }
                 
             protected:
                 /// Will call the `callback` for each Observer
                 void WithObservers(std::function<void(IObserver*)> callback) {
-                    std::vector<IObserverHandle*>* observers = CopyObservers();
-                    for (auto observer : *observers) {
-                        callback(observer->GetObserver());
+                    std::lock_guard<std::recursive_mutex> lock(_mutex);
+                    const std::vector<IObserver*> observers =
+                        _copyObserverPointers();
+
+                    for (IObserver* observer : observers) {
+                        if (_isObserverRegistered(observer)) {
+                            callback(observer);
+                        }
                     }
-                    delete observers;
                 }
 
                 /// Will call the `callback` for each Observer that is of type `ObserverType`
                 template <class ObserverType>
                 void WithObservers(std::function<void(ObserverType*)> callback) {
-                    std::vector<IObserverHandle*>* observers = CopyObservers();
+                    std::lock_guard<std::recursive_mutex> lock(_mutex);
+                    const std::vector<IObserver*> observers =
+                        _copyObserverPointers();
 
-                    for (auto observer : *observers) {
-                        ObserverType* observerAsT = dynamic_cast<ObserverType*>(observer->GetObserver());
+                    for (IObserver* observer : observers) {
+                        if (!_isObserverRegistered(observer)) { continue; }
+                        ObserverType* observerAsT =
+                            dynamic_cast<ObserverType*>(observer);
                         if (!observerAsT) { continue; }
                         callback(observerAsT);
                     }
-
-                    delete observers;
                 }
             public:
-                ~ThreadSafeObservable() {
-                    _mutex.lock();
+                ~ThreadSafeObservable() override {
+                    std::lock_guard<std::recursive_mutex> lock(_mutex);
                     for (auto observer : _observers) {
                         static_cast<ObserverHandle*>(observer)->__invalidate();
                     }
 
                     _observers.clear();
-                    _mutex.unlock();
                 }
 
-                virtual IObserverHandle* RegisterObserver(IObserver* observer) {
-                    _mutex.lock();
+                IObserverHandle* RegisterObserver(IObserver* observer) override {
+                    std::lock_guard<std::recursive_mutex> lock(_mutex);
                     for (auto thisObserver : _observers) {
                         if (thisObserver->GetObserver() == observer) {
-                            _mutex.unlock();
                             return thisObserver;
                         }
                     }
-                    IObserverHandle* handle = new ObserverHandle(this, observer);
-                    _observers.push_back(handle);
-                    _mutex.unlock();
-                    return handle;
+                    std::unique_ptr<ObserverHandle> handle =
+                        std::make_unique<ObserverHandle>(this, observer);
+                    ObserverHandle* result = handle.get();
+                    _observers.push_back(result);
+                    handle.release();
+                    return result;
                 }
 
-                virtual void UnregisterObserver(IObserver* observer) {
-                    _mutex.lock();
+                void UnregisterObserver(IObserver* observer) override {
+                    std::lock_guard<std::recursive_mutex> lock(_mutex);
                     for (auto thisObserver = _observers.begin(); thisObserver != _observers.end(); thisObserver++) {
                         if ((*thisObserver)->GetObserver() == observer) {
                             static_cast<ObserverHandle*>((*thisObserver))->__invalidate();
                             _observers.erase(thisObserver);
-                            _mutex.unlock();
                             return;
                         }
                     }
-                    _mutex.unlock();
                 }
 
-                virtual bool IsObserverRegistered(IObserver* observer) {
-                    _mutex.lock();
-                    for (auto thisObserver : _observers) {
-                        if ((*thisObserver).GetObserver() == observer) {
-                            _mutex.unlock();
-                            return true;
-                        }
-                    }
-                    _mutex.unlock();
-                    return false;
+                bool IsObserverRegistered(IObserver* observer) override {
+                    std::lock_guard<std::recursive_mutex> lock(_mutex);
+                    return _isObserverRegistered(observer);
                 }
         };
 

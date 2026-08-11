@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include "ESPressio_IObservable.hpp"
@@ -37,22 +38,25 @@ namespace ESPressio {
                     }
                 }
             public:
-                ~Observable() {
+                ~Observable() override {
                     for (auto observer : _observers) {
                         static_cast<ObserverHandle*>(observer)->__invalidate();
                     }
                 }
 
-                virtual IObserverHandle* RegisterObserver(IObserver* observer) {
+                IObserverHandle* RegisterObserver(IObserver* observer) override {
                     for (auto thisObserver : _observers) {
                         if (thisObserver->GetObserver() == observer) { return thisObserver; }
                     }
-                    IObserverHandle* handle = new ObserverHandle(this, observer);
-                    _observers.push_back(handle);
-                    return handle;
+                    std::unique_ptr<ObserverHandle> handle =
+                        std::make_unique<ObserverHandle>(this, observer);
+                    ObserverHandle* result = handle.get();
+                    _observers.push_back(result);
+                    handle.release();
+                    return result;
                 }
 
-                virtual void UnregisterObserver(IObserver* observer) {
+                void UnregisterObserver(IObserver* observer) override {
                     for (auto thisObserver = _observers.begin(); thisObserver != _observers.end(); thisObserver++) {
                         if ((*thisObserver)->GetObserver() == observer) {
                             static_cast<ObserverHandle*>((*thisObserver))->__invalidate();
@@ -62,7 +66,7 @@ namespace ESPressio {
                     }
                 }
 
-                virtual bool IsObserverRegistered(IObserver* observer) {
+                bool IsObserverRegistered(IObserver* observer) override {
                     for (auto thisObserver : _observers) {
                         if ((*thisObserver).GetObserver() == observer) { return true; }
                     }

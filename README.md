@@ -105,11 +105,11 @@ For our use-case, let's presume that we have a class called `Thermometer`, whose
 ### The `Observable` Implementation...
 > We shall presume taht the following code is in a header file called `Thermometer.hpp`
 ```cpp
-#include <ESPressio_Observable>
+#include <ESPressio_Observable.hpp>
 
-using namespace ESPressio::Observable
+using namespace ESPressio::Observable;
 
-class Thermometer : public Observable::Observable {
+class Thermometer : public Observable {
     private:
         int _temperature;
 
@@ -122,7 +122,7 @@ class Thermometer : public Observable::Observable {
             // Let's presume that the outcome is that we have an `int` variable called `temperature`
             if (_temperature == temperature) { return; } // If the temperature hasn't changed, there's nothing to do!
             // Now we know that the temperature has changed
-            NotifyObservers(_temperature, newTemperature); // Notify the Observers of the change...
+            NotifyObservers(_temperature, temperature); // Notify the Observers of the change...
             _temperature = temperature; // ... then store the new Temperature value.
         }
 
@@ -157,7 +157,7 @@ Before we implement `NotifyObservers` we need to add the additional `include` fo
 #include <ESPressio_Observable.hpp>
 #include "ITemperatureObserver.hpp" // < We add this line
 
-using namespace ESPressio::Observable
+using namespace ESPressio::Observable;
 ```
 
 Now we can implement the `NotifyObservers` method accordingly:
@@ -193,7 +193,7 @@ Now, let's define an `Observer` in a new header file called `TemperatureLogger.h
 #include <ESPressio_IObserver.hpp>
 #include "ITemperatureObserver.hpp" // < Remember to include the file containing our interface!
 
-using namespace ESPressio::Observable
+using namespace ESPressio::Observable;
 
 class TemperatureLogger : public IObserver, public ITemperatureObserver {
     public:
@@ -228,7 +228,7 @@ TemperatureLogger temperatureLogger;
 IObserverHandle* observerHandle;
 
 void setup() {
-    observerHandle = thermometer.RegisterObserver(temperatureLogger); // Register our Observer with the Observable
+    observerHandle = thermometer.RegisterObserver(&temperatureLogger); // Register our Observer with the Observable
 }
 
 void loop() {
@@ -239,6 +239,8 @@ It really is as simple as that!
 
 `RegisterObserver` registers the given `Observer` with the `Observable` against which it is invoked.
 It returns an `IObserverHandle*` (pointer) reference which you should retain for the lifetime of your `Observer`. 
+
+`IObservable` and `IObserverHandle` objects are intentionally non-copyable and non-movable. Pass them by reference or pointer; copying an observable or registration handle would allow multiple C++ objects to represent the same registration and invalidate one another's state.
 
 Invoking `delete observerHandle` will not only destroy the Observer Handle (freeing its memory), it will also unregister the `Observer` from the `Observable`.
 In the case of the above (simple) example, both the `Observer` and the `Observable` exist for the entire lifetime of execution, however - you can fully control the lifetimes in your applications.
@@ -264,13 +266,15 @@ with:
 
 Now we simply modify the `Thermometer` class declaration from:
 ```cpp
-class Thermometer : public Observable::Observable {
+class Thermometer : public Observable {
 ```
 to:
 ```cpp
 class Thermometer : public ThreadSafeObservable {
 ```
 There is no need to modify any further implementation, as both `Observable` and `ThreadSafeObservable` identically satisfy the `IObservable` interface. Only their internal implementations differ (the latter appropriately employing thread-safe locks to ensure safe and predictable behaviour when operating across multiple Threads).
+
+`ThreadSafeObservable` serializes notification with registration, unregistration, and destruction. Unregistering from another thread waits for the active notification callback to finish. A callback may register or unregister observers reentrantly; observers removed before their turn in the current notification snapshot are skipped, while newly registered observers participate only in later notifications. Notification exceptions propagate to the caller, with locks and temporary snapshots released automatically.
 
 >**CRITICAL** Just because you're using `ThreadSafeObservable` instead of `Observable`, that does not mean that custom members of **your** `Observable` type (e.g. `_temperature` in `Thermometer`) are implicitly thread-safe!
 
@@ -300,13 +304,13 @@ The above code simply defines a new interface specific for Air Pressure events, 
 
 Now we need to modify the `Observable` (`Thermometer`) to notify any `Observer` implementing `IAirPressureObserver`, so let's modify our `Thermometer.hpp` file accordingly:
 ```cpp
-#include <ESPressio_Observable>
+#include <ESPressio_Observable.hpp>
 #include "ITemperatureObserver.hpp"
 #include "IAirPressureObserver.hpp" // < We add the include for the new Interface
 
-using namespace ESPressio::Observable
+using namespace ESPressio::Observable;
 
-class Thermometer : public Observable::Observable {
+class Thermometer : public Observable {
     private:
         int _temperature;
         int _airPressure;
@@ -342,7 +346,7 @@ class Thermometer : public Observable::Observable {
             // Let's presume that the outcome is that we have an `int` variable called `temperature`
             if (_temperature == temperature) { return; } // If the temperature hasn't changed, there's nothing to do!
             // Now we know that the temperature has changed
-            NotifyTemperatureObservers(_temperature, newTemperature); // Notify the Observers of the change...
+            NotifyTemperatureObservers(_temperature, temperature); // Notify the Observers of the change...
             _temperature = temperature; // ... then store the new Temperature value.
         }
 
@@ -372,7 +376,7 @@ Now, let's define a new `Observer` in a new header file called `AirPressureLogge
 #include <ESPressio_IObserver.hpp>
 #include "IAirPressureObserver.hpp" // < Remember to include the file containing our interface!
 
-using namespace ESPressio::Observable
+using namespace ESPressio::Observable;
 
 class AirPressureLogger : public IObserver, public IAirPressureObserver {
     public:
@@ -408,8 +412,8 @@ IObserverHandle* temperatureObserverHandle; // We shall rename `observerHandle` 
 IObserverHandle* airPressureObserverHandle; // We add a new variable to hold the Air Pressure Observer's Handle.
 
 void setup() {
-    temperatureObserverHandle = thermometer.RegisterObserver(temperatureLogger); // Register our Temperature Observer with the Observable
-    airPressureObserverHandle = thermometer.RegisterObserver(airPressureLogger); // Register our Air PRessure Observer with the Observable
+    temperatureObserverHandle = thermometer.RegisterObserver(&temperatureLogger); // Register our Temperature Observer with the Observable
+    airPressureObserverHandle = thermometer.RegisterObserver(&airPressureLogger); // Register our Air Pressure Observer with the Observable
 }
 
 void loop() {
@@ -437,7 +441,7 @@ We won't go into a complete working example (because there are a vast number of 
 #include "IAirPressureObserver.hpp"
 #include "IBatteryObserver.hpp" // Hypothetical Battery Observer interface
 
-using namespace ESPressio::Observable
+using namespace ESPressio::Observable;
 
 class MyDisplay : public IObserver, public ITemperatureObserver, public IAirPressureObserver, public IBatteryObserver {
     private:

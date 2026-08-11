@@ -14,6 +14,11 @@ namespace ESPressio {
             public:
                 ObserverHandle(IObservable* observable, IObserver* observer) : _observable(observable), _observer(observer) {}
 
+                ObserverHandle(const ObserverHandle&) = delete;
+                ObserverHandle& operator=(const ObserverHandle&) = delete;
+                ObserverHandle(ObserverHandle&&) = delete;
+                ObserverHandle& operator=(ObserverHandle&&) = delete;
+
                 ~ObserverHandle() override {
                     Unregister();
                 }

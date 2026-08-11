@@ -11,6 +11,11 @@ namespace ESPressio {
         /// It is used to not only check if the `IObservable` still exists, but also to unregister the Observer when desired!
         class IObserverHandle {
             public:
+                IObserverHandle() = default;
+                IObserverHandle(const IObserverHandle&) = delete;
+                IObserverHandle& operator=(const IObserverHandle&) = delete;
+                IObserverHandle(IObserverHandle&&) = delete;
+                IObserverHandle& operator=(IObserverHandle&&) = delete;
                 virtual ~IObserverHandle() = default;
                 /// Will Unregister this Observer from the `IObservable` if it still exists
                 virtual void Unregister() = 0;
@@ -23,6 +28,11 @@ namespace ESPressio {
         /// An `IObservable` is an object that can be observed by any number of `IObserver` descendant types
         class IObservable {
             public:
+                IObservable() = default;
+                IObservable(const IObservable&) = delete;
+                IObservable& operator=(const IObservable&) = delete;
+                IObservable(IObservable&&) = delete;
+                IObservable& operator=(IObservable&&) = delete;
                 virtual ~IObservable() = default;
                 /// Will Register the`IObserver` with this `IObservable`
                 virtual IObserverHandle* RegisterObserver(IObserver* observer) = 0;
