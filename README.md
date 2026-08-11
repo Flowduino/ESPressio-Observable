@@ -240,10 +240,18 @@ It really is as simple as that!
 `RegisterObserver` registers the given `Observer` with the `Observable` against which it is invoked.
 It returns an `IObserverHandle*` (pointer) reference which you should retain for the lifetime of your `Observer`. 
 
+Observers are held by non-owning pointer. The library never deletes an Observer and does not extend its lifetime. An Observer must therefore remain alive until its handle has been unregistered (or deleted) and that operation has completed. With `ThreadSafeObservable`, completion of `Unregister()` also waits for any notification currently using that Observer. With the non-thread-safe `Observable`, the caller must ensure that registration, notification, and destruction do not overlap.
+
+Passing `nullptr` to `RegisterObserver` throws `InvalidObserverRegistrationException`. This derives from `ObserverRegistrationException`, which derives from `ObservableException`, which in turn derives from `std::runtime_error`; callers may therefore catch the exact failure, all registration failures, all library observable failures, or standard runtime errors as appropriate.
+
 `IObservable` and `IObserverHandle` objects are intentionally non-copyable and non-movable. Pass them by reference or pointer; copying an observable or registration handle would allow multiple C++ objects to represent the same registration and invalidate one another's state.
 
 Invoking `delete observerHandle` will not only destroy the Observer Handle (freeing its memory), it will also unregister the `Observer` from the `Observable`.
 In the case of the above (simple) example, both the `Observer` and the `Observable` exist for the entire lifetime of execution, however - you can fully control the lifetimes in your applications.
+
+An Observer Handle may safely outlive its Observable. Internally, handles share a small lifetime-control object with the Observable, but the public API remains the non-owning `IObserverHandle*` API. Once Observable destruction begins, `GetObservable()` returns `nullptr` and deleting or unregistering a surviving handle is safe. The raw pointer returned by `GetObservable()` is only an immediate, non-owning observation and must not be retained or used concurrently with Observable destruction.
+
+Custom classes derived directly from `IObservable` must call the protected `BeginObservableDestruction()` method at the beginning of their destructor, before destroying or locking any state used by their registration methods. The base destructor calls it again safely as a fallback, but that later call alone cannot protect state already destroyed by a derived destructor.
 
 ### Remember: You can have as many `Observer`s as you want for a single `Observable`!
 As this section title says, you can register as many `Observer`s as you require for any `Observable` type.

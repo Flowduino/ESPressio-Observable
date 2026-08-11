@@ -39,17 +39,19 @@ namespace ESPressio {
                 }
             public:
                 ~Observable() override {
-                    for (auto observer : _observers) {
-                        static_cast<ObserverHandle*>(observer)->__invalidate();
-                    }
+                    BeginObservableDestruction();
+                    _observers.clear();
                 }
 
                 IObserverHandle* RegisterObserver(IObserver* observer) override {
+                    if (observer == nullptr) {
+                        throw InvalidObserverRegistrationException();
+                    }
                     for (auto thisObserver : _observers) {
                         if (thisObserver->GetObserver() == observer) { return thisObserver; }
                     }
                     std::unique_ptr<ObserverHandle> handle =
-                        std::make_unique<ObserverHandle>(this, observer);
+                        std::make_unique<ObserverHandle>(GetLifetimeControl(), observer);
                     ObserverHandle* result = handle.get();
                     _observers.push_back(result);
                     handle.release();
@@ -68,7 +70,7 @@ namespace ESPressio {
 
                 bool IsObserverRegistered(IObserver* observer) override {
                     for (auto thisObserver : _observers) {
-                        if ((*thisObserver).GetObserver() == observer) { return true; }
+                        if (thisObserver->GetObserver() == observer) { return true; }
                     }
                     return false;
                 }

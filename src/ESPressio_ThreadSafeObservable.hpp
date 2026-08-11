@@ -72,15 +72,15 @@ namespace ESPressio {
                 }
             public:
                 ~ThreadSafeObservable() override {
+                    BeginObservableDestruction();
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
-                    for (auto observer : _observers) {
-                        static_cast<ObserverHandle*>(observer)->__invalidate();
-                    }
-
                     _observers.clear();
                 }
 
                 IObserverHandle* RegisterObserver(IObserver* observer) override {
+                    if (observer == nullptr) {
+                        throw InvalidObserverRegistrationException();
+                    }
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
                     for (auto thisObserver : _observers) {
                         if (thisObserver->GetObserver() == observer) {
@@ -88,7 +88,7 @@ namespace ESPressio {
                         }
                     }
                     std::unique_ptr<ObserverHandle> handle =
-                        std::make_unique<ObserverHandle>(this, observer);
+                        std::make_unique<ObserverHandle>(GetLifetimeControl(), observer);
                     ObserverHandle* result = handle.get();
                     _observers.push_back(result);
                     handle.release();

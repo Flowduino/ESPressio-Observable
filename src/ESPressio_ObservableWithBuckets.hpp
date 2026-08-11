@@ -59,16 +59,17 @@ namespace ESPressio {
                 }
             public:
                 ~ObservableWithBuckets() {
+                    BeginObservableDestruction();
                     for (auto& observer : _observers) { // Iterate all of the Type Buckets...
-                        for (auto& observerHandle : *observer.second) { // ...and for each Observer in the Bucket...
-                            static_cast<ObserverHandle*>(observerHandle)->__invalidate(); // ...invalidate it
-                        }
                         delete observer.second; // ...and delete the Bucket
                     }
                     _observers.clear(); // Clear the Map
                 }
 
                 virtual IObserverHandle* RegisterObserver(IObserver* observer) {
+                    if (observer == nullptr) {
+                        throw InvalidObserverRegistrationException();
+                    }
                     auto observerType = std::type_index(typeid(*observer)); // Get the Type Index of the Observer
                     std::vector<IObserverHandle*>* observers = _observers[observerType]; // Get the Observers for this Type Index
                     if (observers == nullptr) { // If there are no Observers for this Type Index...
