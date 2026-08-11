@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include "ESPressio_IObservable.hpp"
@@ -40,12 +41,8 @@ namespace ESPressio {
 
                     return observers;
                 }
-                
-            protected:
-                /// Will call the `callback` for each Observer
-                void WithObservers(std::function<void(IObserver*)> callback) {
-                    const std::shared_ptr<IObservable> notificationLifetime =
-                        AcquireNotificationLifetime();
+
+                void _withObservers(std::function<void(IObserver*)> callback) {
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
                     const std::vector<IObserver*> observers =
                         _copyObserverPointers();
@@ -57,11 +54,8 @@ namespace ESPressio {
                     }
                 }
 
-                /// Will call the `callback` for each Observer that is of type `ObserverType`
                 template <class ObserverType>
-                void WithObservers(std::function<void(ObserverType*)> callback) {
-                    const std::shared_ptr<IObservable> notificationLifetime =
-                        AcquireNotificationLifetime();
+                void _withObservers(std::function<void(ObserverType*)> callback) {
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
                     const std::vector<IObserver*> observers =
                         _copyObserverPointers();
@@ -73,6 +67,36 @@ namespace ESPressio {
                         if (!observerAsT) { continue; }
                         callback(observerAsT);
                     }
+                }
+
+            protected:
+                class NotificationContext {
+                    private:
+                        friend class ThreadSafeObservable;
+                        ThreadSafeObservable& _observable;
+                        std::shared_ptr<IObservable> _notificationLifetime;
+                        NotificationContext(
+                            ThreadSafeObservable& observable,
+                            std::shared_ptr<IObservable> notificationLifetime)
+                            : _observable(observable),
+                              _notificationLifetime(std::move(notificationLifetime)) {}
+
+                    public:
+                        void WithObservers(std::function<void(IObserver*)> callback) {
+                            _observable._withObservers(std::move(callback));
+                        }
+
+                        template <class ObserverType>
+                        void WithObservers(std::function<void(ObserverType*)> callback) {
+                            _observable._withObservers<ObserverType>(std::move(callback));
+                        }
+                };
+
+                template <class Operation>
+                void ExecuteNotification(Operation&& operation) {
+                    NotificationContext context(
+                        *this, AcquireNotificationLifetime());
+                    operation(context);
                 }
             public:
                 ~ThreadSafeObservable() override {
@@ -91,8 +115,8 @@ namespace ESPressio {
                             return thisObserver;
                         }
                     }
-                    std::unique_ptr<ObserverHandle> handle =
-                        std::make_unique<ObserverHandle>(GetLifetimeControl(), observer);
+                    std::unique_ptr<ObserverHandle> handle(
+                        new ObserverHandle(GetLifetimeControl(), observer));
                     ObserverHandle* result = handle.get();
                     _observers.push_back(result);
                     handle.release();

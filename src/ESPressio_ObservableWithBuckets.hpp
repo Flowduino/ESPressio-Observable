@@ -119,13 +119,9 @@ namespace ESPressio {
                     }
                 }
 
-            protected:
-                /// Calls callback for each Observer registered under ObserverType.
                 /// Dispatch uses the interface pointer resolved during registration.
                 template <class ObserverType, class Callback>
-                void WithObservers(Callback&& callback) {
-                    const std::shared_ptr<IObservable> notificationLifetime =
-                        AcquireNotificationLifetime();
+                void _withObservers(Callback&& callback) {
                     const auto bucketIterator =
                         _buckets.find(std::type_index(typeid(ObserverType)));
                     if (bucketIterator == _buckets.end()) { return; }
@@ -133,6 +129,33 @@ namespace ESPressio {
                     for (const BucketEntry& entry : bucketIterator->second) {
                         callback(static_cast<ObserverType*>(entry.observerInterface));
                     }
+                }
+
+            protected:
+                class NotificationContext {
+                    private:
+                        friend class ObservableWithBuckets;
+                        ObservableWithBuckets& _observable;
+                        std::shared_ptr<IObservable> _notificationLifetime;
+                        NotificationContext(
+                            ObservableWithBuckets& observable,
+                            std::shared_ptr<IObservable> notificationLifetime)
+                            : _observable(observable),
+                              _notificationLifetime(std::move(notificationLifetime)) {}
+
+                    public:
+                        template <class ObserverType, class Callback>
+                        void WithObservers(Callback&& callback) {
+                            _observable._withObservers<ObserverType>(
+                                std::forward<Callback>(callback));
+                        }
+                };
+
+                template <class Operation>
+                void ExecuteNotification(Operation&& operation) {
+                    NotificationContext context(
+                        *this, AcquireNotificationLifetime());
+                    operation(context);
                 }
 
             public:
@@ -189,9 +212,8 @@ namespace ESPressio {
                         return existing->second.handle;
                     }
 
-                    auto handle = std::make_unique<ObserverHandle>(
-                        GetLifetimeControl(), observer
-                    );
+                    std::unique_ptr<ObserverHandle> handle(
+                        new ObserverHandle(GetLifetimeControl(), observer));
                     ObserverHandle* result = handle.get();
                     std::vector<std::type_index> insertedBuckets;
                     insertedBuckets.reserve(resolvedInterfaces.size());

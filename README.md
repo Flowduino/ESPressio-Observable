@@ -164,15 +164,15 @@ using namespace ESPressio::Observable;
 Now we can implement the `NotifyObservers` method accordingly:
 ```cpp
         void NotifyObservers(int oldTemperature, int newTemperature) {
-            const auto notificationLifetime = AcquireNotificationLifetime();
-            WithObservers<ITemperatureObserver>([oldTemperature, newTemperature](ITemperatureObserver* observer) {
-                observer->OnTemperatureChanged(oldTemperature, newTemperature);
-                if (newTemperature > oldTemperature) { // Temperature has Increased
-                    observer->OnTemperatureIncreased(newTemperature - oldTemperature);
-                }
-                else if (oldTemperature > newTemperature) { // Temperature has Decreased
-                    observer->OnTemperatureDecreased(oldTemperature - newTemperature);
-                }
+            ExecuteNotification([&](NotificationContext& notification) {
+                notification.WithObservers<ITemperatureObserver>([oldTemperature, newTemperature](ITemperatureObserver* observer) {
+                    observer->OnTemperatureChanged(oldTemperature, newTemperature);
+                    if (newTemperature > oldTemperature) {
+                        observer->OnTemperatureIncreased(newTemperature - oldTemperature);
+                    } else if (oldTemperature > newTemperature) {
+                        observer->OnTemperatureDecreased(oldTemperature - newTemperature);
+                    }
+                });
             });
         }
 ```
@@ -249,18 +249,21 @@ Passing `nullptr` to `RegisterObserver` throws `InvalidObserverRegistrationExcep
 
 `IObservable` and `IObserverHandle` objects are intentionally non-copyable and non-movable. Pass them by reference or pointer; copying an observable or registration handle would allow multiple C++ objects to represent the same registration and invalidate one another's state.
 
-Version 2 Observable objects must be owned by `std::shared_ptr` before invoking a notification method. Every derived notification entry point must retain a lifetime token for its complete body, so releasing the final external owner inside a callback safely defers destruction until that notification method unwinds. Construct Observables with `std::make_shared`; do not destroy one with a raw `delete`. Attempting notification on an Observable that is not managed by `std::shared_ptr` throws `ObservableOwnershipException`.
+Version 2 Observable objects must be owned by `std::shared_ptr` before invoking a notification method. Every derived notification entry point must place its complete operation inside `ExecuteNotification()`, which retains ownership until that operation finishes. Construct Observables with `std::make_shared`. Attempting notification on an Observable that is not managed by `std::shared_ptr` throws `ObservableOwnershipException`.
+
+> **CRITICAL OWNERSHIP REQUIREMENT:** Never invoke raw `delete` on an Observable and never create a second independent `shared_ptr` from its raw pointer. Release or reset the existing `shared_ptr` owner instead. C++ cannot prohibit raw deletion for every arbitrary derived type with a public destructor; violating this rule can cause double destruction and memory corruption.
 
 ```cpp
 void NotifyObservers(int oldValue, int newValue) {
-    const auto notificationLifetime = AcquireNotificationLifetime();
-    WithObservers<IMyObserver>([oldValue, newValue](IMyObserver* observer) {
-        observer->OnValueChanged(oldValue, newValue);
+    ExecuteNotification([&](NotificationContext& notification) {
+        notification.WithObservers<IMyObserver>([oldValue, newValue](IMyObserver* observer) {
+            observer->OnValueChanged(oldValue, newValue);
+        });
     });
 }
 ```
 
-The token must be declared before notification and remain in scope until every operation that follows the callbacks has completed. The built-in dispatch methods also retain an inner safety token, but that inner token cannot protect code in the derived method after `WithObservers()` returns.
+Direct dispatch is available only through the `NotificationContext` supplied to `ExecuteNotification()`. Put callback dispatch and every subsequent operation that accesses Observable state inside that operation. Once `ExecuteNotification()` returns, the final external owner may have been released and the method must return without accessing the Observable again.
 
 `IObservable` defines the common lifetime, unregistration, and registration-query contract. `IUntypedObservable` extends it with `RegisterObserver(IObserver*)` for `Observable` and `ThreadSafeObservable`. `ObservableWithBuckets` remains an `IObservable` and provides its type-safe `RegisterObserverAs<...>()` operation without exposing an untyped registration operation that cannot be implemented correctly.
 
@@ -310,6 +313,18 @@ There is no need to modify any further implementation, as both `Observable` and 
 
 For broader Thread-Safe implementation needs, you should check out our [ESPressio Threads](https://github.com/Flowduino/ESPressio-Threads) library, which provides a simple and elegant means of making members of your own classes thread-safe.
 
+### Tests and coverage
+
+The repository includes a comprehensive CMake/CTest suite under `tests/`. To run the strict test build:
+
+```sh
+cmake -S tests -B build/tests
+cmake --build build/tests
+ctest --test-dir build/tests --output-on-failure
+```
+
+Enable AddressSanitizer and UndefinedBehaviorSanitizer with `-DESPRESSIO_ENABLE_SANITIZERS=ON`, or coverage instrumentation with `-DESPRESSIO_ENABLE_COVERAGE=ON`. The options are intentionally separate because combining coverage and sanitizers is not consistently supported across embedded-development host toolchains.
+
 ### High-performance bucketed dispatch
 
 `ObservableWithBuckets` is a non-thread-safe alternative for use-cases where notification latency is critical. Unlike `Observable`, it resolves each requested Observer interface once during registration and stores the correctly adjusted interface pointer in a type-specific bucket. Notification therefore requires no `dynamic_cast` and visits only Observers registered for the requested interface.
@@ -322,12 +337,13 @@ Because C++ cannot enumerate every interface implemented by an arbitrary object,
 class FastThermometer : public ObservableWithBuckets {
     public:
         void NotifyTemperatureChanged(int oldTemperature, int newTemperature) {
-            const auto notificationLifetime = AcquireNotificationLifetime();
-            WithObservers<ITemperatureObserver>(
-                [oldTemperature, newTemperature](ITemperatureObserver* observer) {
-                    observer->OnTemperatureChanged(oldTemperature, newTemperature);
-                }
-            );
+            ExecuteNotification([&](NotificationContext& notification) {
+                notification.WithObservers<ITemperatureObserver>(
+                    [oldTemperature, newTemperature](ITemperatureObserver* observer) {
+                        observer->OnTemperatureChanged(oldTemperature, newTemperature);
+                    }
+                );
+            });
         }
 };
 
@@ -384,29 +400,29 @@ class Thermometer : public Observable {
 
         // We will rename `NotifyObservers` to `NotifyTemperatureObservers` to avoid ambiguity
         void NotifyTemperatureObservers(int oldTemperature, int newTemperature) {
-            const auto notificationLifetime = AcquireNotificationLifetime();
-            WithObservers<ITemperatureObserver>([oldTemperature, newTemperature](ITemperatureObserver* observer) {
-                observer->OnTemperatureChanged(oldTemperature, newTemperature);
-                if (newTemperature > oldTemperature) { // Temperature has Increased
-                    observer->OnTemperatureIncreased(newTemperature - oldTemperature);
-                }
-                else if (oldTemperature > newTemperature) { // Temperature has Decreased
-                    observer->OnTemperatureDecreased(oldTemperature - newTemperature);
-                }
+            ExecuteNotification([&](NotificationContext& notification) {
+                notification.WithObservers<ITemperatureObserver>([oldTemperature, newTemperature](ITemperatureObserver* observer) {
+                    observer->OnTemperatureChanged(oldTemperature, newTemperature);
+                    if (newTemperature > oldTemperature) {
+                        observer->OnTemperatureIncreased(newTemperature - oldTemperature);
+                    } else if (oldTemperature > newTemperature) {
+                        observer->OnTemperatureDecreased(oldTemperature - newTemperature);
+                    }
+                });
             });
         }
 
         // We will add `NotifyAirPressureObservers` per our expansion
         void NotifyAirPressureObservers(int oldPressure, int newPressure) {
-            const auto notificationLifetime = AcquireNotificationLifetime();
-            WithObservers<IAirPressureObserver>([oldPressure, newPressure](IAirPressureObserver* observer) {
-                observer->OnAirPressureChanged(oldPressure, newPressure);
-                if (newPressure > oldPressure) { // Air Pressure has Increased
-                    observer->OnAirPressureIncreased(newPressure - oldPressure);
-                }
-                else if (oldPressure > newPressure) { // Air Pressure has Decreased
-                    observer->OnAirPressureDecreased(oldPressure - newPressure);
-                }
+            ExecuteNotification([&](NotificationContext& notification) {
+                notification.WithObservers<IAirPressureObserver>([oldPressure, newPressure](IAirPressureObserver* observer) {
+                    observer->OnAirPressureChanged(oldPressure, newPressure);
+                    if (newPressure > oldPressure) {
+                        observer->OnAirPressureIncreased(newPressure - oldPressure);
+                    } else if (oldPressure > newPressure) {
+                        observer->OnAirPressureDecreased(oldPressure - newPressure);
+                    }
+                });
             });
         }
     public:

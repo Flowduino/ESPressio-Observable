@@ -49,7 +49,7 @@ namespace ESPressio {
                     _observer.store(nullptr);
                 }
 
-            public:
+            private:
                 ObserverHandle(IObservable* observable, IObserver* observer)
                     : ObserverHandle(GetValidatedLifetimeControl(observable), observer) {}
 
@@ -59,6 +59,8 @@ namespace ESPressio {
                     : _lifetimeControl(
                         GetValidatedLifetimeControl(std::move(lifetimeControl))),
                       _observer(GetValidatedObserver(observer)) {}
+
+            public:
 
                 ObserverHandle(const ObserverHandle&) = delete;
                 ObserverHandle& operator=(const ObserverHandle&) = delete;

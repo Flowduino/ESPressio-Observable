@@ -168,6 +168,9 @@ namespace ESPressio {
                 IObservable& operator=(const IObservable&) = delete;
                 IObservable(IObservable&&) = delete;
                 IObservable& operator=(IObservable&&) = delete;
+                /// Observable instances participating in notification must be owned
+                /// exclusively through std::shared_ptr. Invoking raw delete on a
+                /// shared-owned Observable is an ownership violation and undefined.
                 virtual ~IObservable() {
                     BeginObservableDestruction();
                 }
