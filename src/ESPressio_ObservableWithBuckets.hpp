@@ -1,30 +1,11 @@
 #pragma once
 
-#ifndef ESPRESSIO_OBSERVABLE_EXPERIMENTAL
-    #error This implementation is not yet complete. Please check back later for updates.
-    /*
-        NOTES:
-        - This is an experimental attempt to make a Bucketed Observerable Type.
-        - Due to language limitations in C++, what I'm attempting to achieve here may not be possible in any elegant way.
-        - It is entirely possible that this implementation may be scrapped later, which is why it is marked with this error.
-        
-        ISSUES:
-        - Because each Observer type can inherit from multiple `IObserver` descendant types, registration of a single
-            Observer with multiple `IObserver` descendant types can lead to undefined behavior. This is because the
-            code cannot determine which `IObserver` type or types are applicable for that singular Observer object.
-        - This is a limitation of the C++ language, and is not something that can be easily worked around.
-
-        WORKAROUNDS:
-        - Use the `Observable` or `ThreadSafeObservable` classes instead. They are fully functional and have no known issues.
-            They use a Dynamic Cast method to determine whether each given Observer satisfies a specific `IObserver` descendant type.
-            This is the only known way to achieve this functionality in C++ (for now)
-
-    */
-#endif
-
-#include <functional>
+#include <algorithm>
+#include <memory>
+#include <type_traits>
 #include <typeindex>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "ESPressio_IObservable.hpp"
@@ -34,81 +15,227 @@
 namespace ESPressio {
 
     namespace Observable {
-   
-        /// An `ObservableWithBuckets` is an object that can be observed by any number of `IObserver` descendant types
-        /// This is a concrete implementation of `IObservable`.
-        /// This variation uses "Buckets" (a Map, effectively) keyed on the `IObserver` type.
-        /// It may be more performant when your descendant Observable is observed by a large number of DIFFERENT Observer types!
-        /// THIS TYPE IS NOT THREAD-SAFE!
-        /// Registering or Unregistering Observers while Observers are being notified can lead to undefined behavior.
-        /// If you need a Thread-Safe Implementation, use the `ThreadSafeObservableWithBuckets` class instead.
+
+        namespace Detail {
+            template <class... ObserverInterfaces>
+            struct AllInterfacesPolymorphic;
+
+            template <>
+            struct AllInterfacesPolymorphic<> : std::true_type {};
+
+            template <class ObserverInterface, class... RemainingInterfaces>
+            struct AllInterfacesPolymorphic<ObserverInterface, RemainingInterfaces...>
+                : std::integral_constant<
+                    bool,
+                    std::is_polymorphic<ObserverInterface>::value &&
+                    AllInterfacesPolymorphic<RemainingInterfaces...>::value
+                > {};
+        }
+
+        /// A non-thread-safe Observable optimized for typed dispatch. Observer
+        /// interfaces are supplied explicitly at registration so notification
+        /// performs no dynamic casts.
         class ObservableWithBuckets : public IObservable {
             private:
-                std::unordered_map<std::type_index, std::vector<IObserverHandle*>*> _observers;
-            protected:
-                /// Will call the `callback` for each Observer that is of type `ObserverType`
-                template <class ObserverType>
-                void WithObservers(std::function<void(ObserverType*)> callback) {
-                    auto observerType = std::type_index(typeid(ObserverType)); // Get the Type Index of the ObserverType
-                    std::vector<IObserverHandle*>* observers = _observers[observerType]; // Get the Observers for this Type Index
-                    if (observers == nullptr || observers->empty()) { return; } // If there are no Observers, return
+                struct BucketEntry {
+                    ObserverHandle* handle;
+                    void* observerInterface;
+                };
 
-                    for (auto observer : *observers) { // For each Observer...
-                        callback(observer->GetObserver()); // ...call the callback (we know that it is of type `ObserverType`)
-                    }
-                }
-            public:
-                ~ObservableWithBuckets() {
-                    BeginObservableDestruction();
-                    for (auto& observer : _observers) { // Iterate all of the Type Buckets...
-                        delete observer.second; // ...and delete the Bucket
-                    }
-                    _observers.clear(); // Clear the Map
-                }
+                struct Registration {
+                    ObserverHandle* handle;
+                    std::vector<std::type_index> interfaces;
+                };
 
-                virtual IObserverHandle* RegisterObserver(IObserver* observer) {
-                    if (observer == nullptr) {
-                        throw InvalidObserverRegistrationException();
-                    }
-                    auto observerType = std::type_index(typeid(*observer)); // Get the Type Index of the Observer
-                    std::vector<IObserverHandle*>* observers = _observers[observerType]; // Get the Observers for this Type Index
-                    if (observers == nullptr) { // If there are no Observers for this Type Index...
-                        observers = new std::vector<IObserverHandle*>(); // ...create a new vector
-                        _observers[observerType] = observers; // ...and add it to the Map
-                    }
+                using Bucket = std::vector<BucketEntry>;
 
-                    for (auto thisObserver : *observers) { // For each Observer in the vector...
-                        if (thisObserver->GetObserver() == observer) { return thisObserver; } // ...if it is the same as the one we are trying to register, return it
-                    }
+                std::unordered_map<std::type_index, Bucket> _buckets;
+                std::unordered_map<IObserver*, Registration> _registrations;
 
-                    IObserverHandle* handle = new ObserverHandle(this, observer); // Create a new ObserverHandle
-                    observers->push_back(handle); // Add it to the vector
-                    return handle; // Return the ObserverHandle
+                static bool _containsInterface(
+                    const std::vector<std::type_index>& interfaces,
+                    const std::type_index& observerInterface) {
+                    return std::find(
+                        interfaces.begin(), interfaces.end(), observerInterface
+                    ) != interfaces.end();
                 }
 
-                virtual void UnregisterObserver(IObserver* observer) {
-                    auto observerType = std::type_index(typeid(*observer)); // Get the Type Index of the Observer
-                    std::vector<IObserverHandle*>* observers = _observers[observerType]; // Get the Observers for this Type Index
-                    if (observers == nullptr || observers->empty()) { return; } // If there are no Observers, return
+                static bool _sameInterfaces(
+                    const std::vector<std::type_index>& left,
+                    const std::vector<std::type_index>& right) {
+                    if (left.size() != right.size()) { return false; }
+                    for (const std::type_index& observerInterface : left) {
+                        if (!_containsInterface(right, observerInterface)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
 
-                    for (auto thisObserver = observers->begin(); thisObserver != observers->end(); thisObserver++) { // For each Observer in the vector...
-                        if ((*thisObserver)->GetObserver() == observer) { // ...if it is the same as the one we are trying to unregister...
-                            static_cast<ObserverHandle*>((*thisObserver))->__invalidate(); // ...invalidate it
-                            observers->erase(thisObserver); // ...and erase it from the vector
-                            return; // ...and return
+                template <class ObserverInterface>
+                static bool _resolveInterface(
+                    IObserver* observer,
+                    std::vector<std::pair<std::type_index, void*> >& resolvedInterfaces) {
+                    ObserverInterface* observerInterface =
+                        dynamic_cast<ObserverInterface*>(observer);
+                    if (observerInterface == nullptr) { return false; }
+
+                    const std::type_index interfaceType(typeid(ObserverInterface));
+                    const auto duplicate = std::find_if(
+                        resolvedInterfaces.begin(), resolvedInterfaces.end(),
+                        [&interfaceType](
+                            const std::pair<std::type_index, void*>& resolved) {
+                            return resolved.first == interfaceType;
+                        }
+                    );
+                    if (duplicate == resolvedInterfaces.end()) {
+                        resolvedInterfaces.emplace_back(
+                            interfaceType,
+                            static_cast<void*>(observerInterface)
+                        );
+                    }
+                    return true;
+                }
+
+                void _removeFromBuckets(const Registration& registration) noexcept {
+                    for (const std::type_index& observerInterface : registration.interfaces) {
+                        auto bucketIterator = _buckets.find(observerInterface);
+                        if (bucketIterator == _buckets.end()) { continue; }
+
+                        Bucket& bucket = bucketIterator->second;
+                        bucket.erase(
+                            std::remove_if(
+                                bucket.begin(), bucket.end(),
+                                [&registration](const BucketEntry& entry) {
+                                    return entry.handle == registration.handle;
+                                }
+                            ),
+                            bucket.end()
+                        );
+
+                        if (bucket.empty()) {
+                            _buckets.erase(bucketIterator);
                         }
                     }
                 }
 
-                virtual bool IsObserverRegistered(IObserver* observer) {
-                    auto observerType = std::type_index(typeid(*observer)); // Get the Type Index of the Observer
-                    std::vector<IObserverHandle*>* observers = _observers[observerType]; // Get the Observers for this Type Index
-                    if (observers == nullptr || observers->empty()) { return false; } // If there are no Observers, return false
+            protected:
+                /// Calls callback for each Observer registered under ObserverType.
+                /// Dispatch uses the interface pointer resolved during registration.
+                template <class ObserverType, class Callback>
+                void WithObservers(Callback&& callback) {
+                    const auto bucketIterator =
+                        _buckets.find(std::type_index(typeid(ObserverType)));
+                    if (bucketIterator == _buckets.end()) { return; }
 
-                    for (auto thisObserver : *observers) { // For each Observer in the vector...
-                        if (thisObserver->GetObserver() == observer) { return true; } // ...if it is the same as the one we are checking, return true
+                    for (const BucketEntry& entry : bucketIterator->second) {
+                        callback(static_cast<ObserverType*>(entry.observerInterface));
                     }
-                    return false; // If we didn't find it, return false
+                }
+
+            public:
+                ~ObservableWithBuckets() override {
+                    BeginObservableDestruction();
+                    _buckets.clear();
+                    _registrations.clear();
+                }
+
+                /// Untyped registration cannot determine an Observer's interfaces.
+                /// Use RegisterObserverAs<ObserverInterfaces...>() instead.
+                IObserverHandle* RegisterObserver(IObserver* observer) override {
+                    if (observer == nullptr) {
+                        throw InvalidObserverRegistrationException();
+                    }
+                    throw ExplicitObserverInterfacesRequiredException();
+                }
+
+                template <class... ObserverInterfaces>
+                IObserverHandle* RegisterObserverAs(IObserver* observer) {
+                    static_assert(
+                        sizeof...(ObserverInterfaces) > 0,
+                        "At least one Observer interface must be specified"
+                    );
+                    static_assert(
+                        Detail::AllInterfacesPolymorphic<ObserverInterfaces...>::value,
+                        "Every Observer interface must be polymorphic"
+                    );
+
+                    if (observer == nullptr) {
+                        throw InvalidObserverRegistrationException();
+                    }
+
+                    std::vector<std::pair<std::type_index, void*> > resolvedInterfaces;
+                    resolvedInterfaces.reserve(sizeof...(ObserverInterfaces));
+
+                    bool interfacesMatch = true;
+                    const int resolveInterfaces[] = {
+                        0,
+                        (interfacesMatch =
+                            _resolveInterface<ObserverInterfaces>(
+                                observer, resolvedInterfaces
+                            ) && interfacesMatch,
+                         0)...
+                    };
+                    (void)resolveInterfaces;
+
+                    if (!interfacesMatch) {
+                        throw ObserverInterfaceMismatchException();
+                    }
+
+                    std::vector<std::type_index> interfaceTypes;
+                    interfaceTypes.reserve(resolvedInterfaces.size());
+                    for (const auto& resolved : resolvedInterfaces) {
+                        interfaceTypes.push_back(resolved.first);
+                    }
+
+                    const auto existing = _registrations.find(observer);
+                    if (existing != _registrations.end()) {
+                        if (!_sameInterfaces(existing->second.interfaces, interfaceTypes)) {
+                            throw ObserverRegistrationConflictException();
+                        }
+                        return existing->second.handle;
+                    }
+
+                    auto handle = std::make_unique<ObserverHandle>(
+                        GetLifetimeControl(), observer
+                    );
+                    ObserverHandle* result = handle.get();
+                    std::vector<std::type_index> insertedBuckets;
+                    insertedBuckets.reserve(resolvedInterfaces.size());
+
+                    try {
+                        for (const auto& resolved : resolvedInterfaces) {
+                            _buckets[resolved.first].push_back(
+                                BucketEntry{result, resolved.second}
+                            );
+                            insertedBuckets.push_back(resolved.first);
+                        }
+
+                        _registrations.emplace(
+                            observer,
+                            Registration{result, std::move(interfaceTypes)}
+                        );
+                    } catch (...) {
+                        Registration partial{result, std::move(insertedBuckets)};
+                        _removeFromBuckets(partial);
+                        throw;
+                    }
+
+                    handle.release();
+                    return result;
+                }
+
+                void UnregisterObserver(IObserver* observer) override {
+                    const auto registration = _registrations.find(observer);
+                    if (registration == _registrations.end()) { return; }
+
+                    registration->second.handle->__invalidate();
+                    _removeFromBuckets(registration->second);
+                    _registrations.erase(registration);
+                }
+
+                bool IsObserverRegistered(IObserver* observer) override {
+                    return _registrations.find(observer) != _registrations.end();
                 }
         };
 

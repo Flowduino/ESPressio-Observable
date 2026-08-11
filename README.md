@@ -290,6 +290,43 @@ There is no need to modify any further implementation, as both `Observable` and 
 
 For broader Thread-Safe implementation needs, you should check out our [ESPressio Threads](https://github.com/Flowduino/ESPressio-Threads) library, which provides a simple and elegant means of making members of your own classes thread-safe.
 
+### High-performance bucketed dispatch
+
+`ObservableWithBuckets` is a non-thread-safe alternative for use-cases where notification latency is critical. Unlike `Observable`, it resolves each requested Observer interface once during registration and stores the correctly adjusted interface pointer in a type-specific bucket. Notification therefore requires no `dynamic_cast` and visits only Observers registered for the requested interface.
+
+Because C++ cannot enumerate every interface implemented by an arbitrary object, bucket membership must be supplied explicitly:
+
+```cpp
+#include <ESPressio_ObservableWithBuckets.hpp>
+
+class FastThermometer : public ObservableWithBuckets {
+    public:
+        void NotifyTemperatureChanged(int oldTemperature, int newTemperature) {
+            WithObservers<ITemperatureObserver>(
+                [oldTemperature, newTemperature](ITemperatureObserver* observer) {
+                    observer->OnTemperatureChanged(oldTemperature, newTemperature);
+                }
+            );
+        }
+};
+
+MyDisplay display;
+FastThermometer thermometer;
+
+IObserverHandle* displayHandle =
+    thermometer.RegisterObserverAs<
+        ITemperatureObserver,
+        IAirPressureObserver,
+        IBatteryObserver
+    >(&display);
+```
+
+One handle represents the entire registration. Calling `displayHandle->Unregister()` or deleting the handle removes the Observer from every listed bucket. Registering the same Observer again with the same interface set returns the existing handle; attempting to register it with a different interface set throws `ObserverRegistrationConflictException`. Requesting an interface the object does not implement throws `ObserverInterfaceMismatchException`.
+
+The untyped `RegisterObserver(IObserver*)` operation cannot infer bucket membership and therefore throws `ExplicitObserverInterfacesRequiredException`. Use `RegisterObserverAs<...>()` for every bucketed registration.
+
+As with `Observable`, registration, unregistration, notification, and destruction must not overlap across threads or occur while a notification is iterating. Use `ThreadSafeObservable` when that synchronization guarantee is required.
+
 ### One `Observable`, multiple `Observer` types
 The previous examples have all illustrated how to implement a singular `Observer` type (`ITemperatureObserver`) for a singular `Observable` type (`Thermometer`).
 

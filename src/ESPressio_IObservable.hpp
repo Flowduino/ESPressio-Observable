@@ -30,6 +30,27 @@ namespace ESPressio {
                     : ObserverRegistrationException("Cannot register a null Observer pointer") {}
         };
 
+        class ExplicitObserverInterfacesRequiredException : public ObserverRegistrationException {
+            public:
+                ExplicitObserverInterfacesRequiredException()
+                    : ObserverRegistrationException(
+                        "ObservableWithBuckets requires RegisterObserverAs<ObserverInterfaces...>()") {}
+        };
+
+        class ObserverInterfaceMismatchException : public ObserverRegistrationException {
+            public:
+                ObserverInterfaceMismatchException()
+                    : ObserverRegistrationException(
+                        "Observer does not implement every requested Observer interface") {}
+        };
+
+        class ObserverRegistrationConflictException : public ObserverRegistrationException {
+            public:
+                ObserverRegistrationConflictException()
+                    : ObserverRegistrationException(
+                        "Observer is already registered with a different interface set") {}
+        };
+
         namespace Detail {
             class ObservableLifetimeControl {
                 private:
