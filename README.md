@@ -4,7 +4,7 @@ Observer Pattern Components of the Flowduino ESPressio Development Platform
 Provides a foundation for designing, structuring, and implementing your embedded programs using Observer Pattern.
 
 ## Latest Stable Version
-The latest Stable Version is [1.0.1](https://github.com/Flowduino/ESPressio-Observable/releases/tag/1.0.1).
+The latest Stable Version is [2.0.0](https://github.com/Flowduino/ESPressio-Observable/releases/tag/2.0.0).
 
 ## ESPressio Development Platform
 The **ESPressio** Development Platform is a collection of discrete (sometimes intra-connected) Component Libraries developed with a particular development ethos in mind.
@@ -37,6 +37,7 @@ Every type/variable/constant/etc. related to *ESPressio* Observable are located 
 The namespace provides the following (*click on any declaration to navigate to more info*):
 - [`ESPressio::Observable::IObserverHandle`](#iobserverhandle)
 - [`ESPressio::Observable::IObservable`](#iobservable)
+- `ESPressio::Observable::IUntypedObservable`
 - [`ESPressio::Observable::IObserver`](#iobserver)
 - [`ESPressio::Observable::ObserverHandle`](#observerhandle)
 - [`ESPressio::Observable::ThreadSafeObservable`](#threadsafeobservable)
@@ -46,7 +47,7 @@ You can quickly and easily add this library to your project in PlatformIO by sim
 
 ```ini
 lib_deps =
-    flowduino/ESPressio-Observable@^1.0.1
+    flowduino/ESPressio-Observable@^2.0.0
 ```
 
 Alternatively, if you want to use the bleeding-edge (effectively "Developer Integration Testing" or "DIT") sources, you can instead use:
@@ -163,6 +164,7 @@ using namespace ESPressio::Observable;
 Now we can implement the `NotifyObservers` method accordingly:
 ```cpp
         void NotifyObservers(int oldTemperature, int newTemperature) {
+            const auto notificationLifetime = AcquireNotificationLifetime();
             WithObservers<ITemperatureObserver>([oldTemperature, newTemperature](ITemperatureObserver* observer) {
                 observer->OnTemperatureChanged(oldTemperature, newTemperature);
                 if (newTemperature > oldTemperature) { // Temperature has Increased
@@ -190,6 +192,7 @@ Now that we have the `Observable` implemented, or - more specifically - given th
 
 Now, let's define an `Observer` in a new header file called `TemperatureLogger.hpp` to do something very simple:
 ```cpp
+#include <memory>
 #include <ESPressio_IObserver.hpp>
 #include "ITemperatureObserver.hpp" // < Remember to include the file containing our interface!
 
@@ -223,16 +226,16 @@ So, our `ino` or `main.cpp` file will look something like this:
 #include "TemperatureLogger.hpp"
 #include "Thermometer.hpp"
 
-Thermometer thermometer;
+std::shared_ptr<Thermometer> thermometer = std::make_shared<Thermometer>();
 TemperatureLogger temperatureLogger;
 IObserverHandle* observerHandle;
 
 void setup() {
-    observerHandle = thermometer.RegisterObserver(&temperatureLogger); // Register our Observer with the Observable
+    observerHandle = thermometer->RegisterObserver(&temperatureLogger); // Register our Observer with the Observable
 }
 
 void loop() {
-    thermometer.UpdateTemperature(); // We will update the temperature reading on the loop
+    thermometer->UpdateTemperature(); // We will update the temperature reading on the loop
 }
 ```
 It really is as simple as that!
@@ -245,6 +248,21 @@ Observers are held by non-owning pointer. The library never deletes an Observer 
 Passing `nullptr` to `RegisterObserver` throws `InvalidObserverRegistrationException`. This derives from `ObserverRegistrationException`, which derives from `ObservableException`, which in turn derives from `std::runtime_error`; callers may therefore catch the exact failure, all registration failures, all library observable failures, or standard runtime errors as appropriate.
 
 `IObservable` and `IObserverHandle` objects are intentionally non-copyable and non-movable. Pass them by reference or pointer; copying an observable or registration handle would allow multiple C++ objects to represent the same registration and invalidate one another's state.
+
+Version 2 Observable objects must be owned by `std::shared_ptr` before invoking a notification method. Every derived notification entry point must retain a lifetime token for its complete body, so releasing the final external owner inside a callback safely defers destruction until that notification method unwinds. Construct Observables with `std::make_shared`; do not destroy one with a raw `delete`. Attempting notification on an Observable that is not managed by `std::shared_ptr` throws `ObservableOwnershipException`.
+
+```cpp
+void NotifyObservers(int oldValue, int newValue) {
+    const auto notificationLifetime = AcquireNotificationLifetime();
+    WithObservers<IMyObserver>([oldValue, newValue](IMyObserver* observer) {
+        observer->OnValueChanged(oldValue, newValue);
+    });
+}
+```
+
+The token must be declared before notification and remain in scope until every operation that follows the callbacks has completed. The built-in dispatch methods also retain an inner safety token, but that inner token cannot protect code in the derived method after `WithObservers()` returns.
+
+`IObservable` defines the common lifetime, unregistration, and registration-query contract. `IUntypedObservable` extends it with `RegisterObserver(IObserver*)` for `Observable` and `ThreadSafeObservable`. `ObservableWithBuckets` remains an `IObservable` and provides its type-safe `RegisterObserverAs<...>()` operation without exposing an untyped registration operation that cannot be implemented correctly.
 
 Invoking `delete observerHandle` will not only destroy the Observer Handle (freeing its memory), it will also unregister the `Observer` from the `Observable`.
 In the case of the above (simple) example, both the `Observer` and the `Observable` exist for the entire lifetime of execution, however - you can fully control the lifetimes in your applications.
@@ -282,7 +300,7 @@ to:
 ```cpp
 class Thermometer : public ThreadSafeObservable {
 ```
-There is no need to modify any further implementation, as both `Observable` and `ThreadSafeObservable` identically satisfy the `IObservable` interface. Only their internal implementations differ (the latter appropriately employing thread-safe locks to ensure safe and predictable behaviour when operating across multiple Threads).
+There is no need to modify any further implementation, as both `Observable` and `ThreadSafeObservable` identically satisfy the `IUntypedObservable` interface. Only their internal implementations differ (the latter appropriately employing thread-safe locks to ensure safe and predictable behaviour when operating across multiple Threads).
 
 `ThreadSafeObservable` serializes notification with registration, unregistration, and destruction. Unregistering from another thread waits for the active notification callback to finish. A callback may register or unregister observers reentrantly; observers removed before their turn in the current notification snapshot are skipped, while newly registered observers participate only in later notifications. Notification exceptions propagate to the caller, with locks and temporary snapshots released automatically.
 
@@ -304,6 +322,7 @@ Because C++ cannot enumerate every interface implemented by an arbitrary object,
 class FastThermometer : public ObservableWithBuckets {
     public:
         void NotifyTemperatureChanged(int oldTemperature, int newTemperature) {
+            const auto notificationLifetime = AcquireNotificationLifetime();
             WithObservers<ITemperatureObserver>(
                 [oldTemperature, newTemperature](ITemperatureObserver* observer) {
                     observer->OnTemperatureChanged(oldTemperature, newTemperature);
@@ -313,10 +332,11 @@ class FastThermometer : public ObservableWithBuckets {
 };
 
 MyDisplay display;
-FastThermometer thermometer;
+std::shared_ptr<FastThermometer> thermometer =
+    std::make_shared<FastThermometer>();
 
 IObserverHandle* displayHandle =
-    thermometer.RegisterObserverAs<
+    thermometer->RegisterObserverAs<
         ITemperatureObserver,
         IAirPressureObserver,
         IBatteryObserver
@@ -325,7 +345,7 @@ IObserverHandle* displayHandle =
 
 One handle represents the entire registration. Calling `displayHandle->Unregister()` or deleting the handle removes the Observer from every listed bucket. Registering the same Observer again with the same interface set returns the existing handle; attempting to register it with a different interface set throws `ObserverRegistrationConflictException`. Requesting an interface the object does not implement throws `ObserverInterfaceMismatchException`.
 
-The untyped `RegisterObserver(IObserver*)` operation cannot infer bucket membership and therefore throws `ExplicitObserverInterfacesRequiredException`. Use `RegisterObserverAs<...>()` for every bucketed registration.
+`ObservableWithBuckets` does not implement `IUntypedObservable`, because an untyped registration operation cannot infer bucket membership. Use `RegisterObserverAs<...>()` for every bucketed registration.
 
 As with `Observable`, registration, unregistration, notification, and destruction must not overlap across threads or occur while a notification is iterating. Use `ThreadSafeObservable` when that synchronization guarantee is required.
 
@@ -364,6 +384,7 @@ class Thermometer : public Observable {
 
         // We will rename `NotifyObservers` to `NotifyTemperatureObservers` to avoid ambiguity
         void NotifyTemperatureObservers(int oldTemperature, int newTemperature) {
+            const auto notificationLifetime = AcquireNotificationLifetime();
             WithObservers<ITemperatureObserver>([oldTemperature, newTemperature](ITemperatureObserver* observer) {
                 observer->OnTemperatureChanged(oldTemperature, newTemperature);
                 if (newTemperature > oldTemperature) { // Temperature has Increased
@@ -377,6 +398,7 @@ class Thermometer : public Observable {
 
         // We will add `NotifyAirPressureObservers` per our expansion
         void NotifyAirPressureObservers(int oldPressure, int newPressure) {
+            const auto notificationLifetime = AcquireNotificationLifetime();
             WithObservers<IAirPressureObserver>([oldPressure, newPressure](IAirPressureObserver* observer) {
                 observer->OnAirPressureChanged(oldPressure, newPressure);
                 if (newPressure > oldPressure) { // Air Pressure has Increased
@@ -420,6 +442,7 @@ So, with the `Observable` (`Thermometer`) now expanded to accept both `ITemperat
 
 Now, let's define a new `Observer` in a new header file called `AirPressureLogger.hpp` to do something very simple:
 ```cpp
+#include <memory>
 #include <ESPressio_IObserver.hpp>
 #include "IAirPressureObserver.hpp" // < Remember to include the file containing our interface!
 
@@ -452,20 +475,20 @@ Okay, we're almost done... now we need only modify our `.ino` or `main.cpp` impl
 #include "AirPressureLogger.hpp" // We add the new Include for our new Air Pressure Logger class
 #include "Thermometer.hpp"
 
-Thermometer thermometer;
+std::shared_ptr<Thermometer> thermometer = std::make_shared<Thermometer>();
 TemperatureLogger temperatureLogger;
 AirPressureLogger airPressureLogger;
 IObserverHandle* temperatureObserverHandle; // We shall rename `observerHandle` to `temperatureObserverHandle` to avoid ambiguity.
 IObserverHandle* airPressureObserverHandle; // We add a new variable to hold the Air Pressure Observer's Handle.
 
 void setup() {
-    temperatureObserverHandle = thermometer.RegisterObserver(&temperatureLogger); // Register our Temperature Observer with the Observable
-    airPressureObserverHandle = thermometer.RegisterObserver(&airPressureLogger); // Register our Air Pressure Observer with the Observable
+    temperatureObserverHandle = thermometer->RegisterObserver(&temperatureLogger); // Register our Temperature Observer with the Observable
+    airPressureObserverHandle = thermometer->RegisterObserver(&airPressureLogger); // Register our Air Pressure Observer with the Observable
 }
 
 void loop() {
-    thermometer.UpdateTemperature(); // We will update the temperature reading on the loop
-    thermometer.UpdateAirPressure(); // We will update the Air Pressure reading on the loop too.
+    thermometer->UpdateTemperature(); // We will update the temperature reading on the loop
+    thermometer->UpdateAirPressure(); // We will update the Air Pressure reading on the loop too.
 }
 ```
 And that's all there is to it!

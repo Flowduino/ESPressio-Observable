@@ -124,6 +124,8 @@ namespace ESPressio {
                 /// Dispatch uses the interface pointer resolved during registration.
                 template <class ObserverType, class Callback>
                 void WithObservers(Callback&& callback) {
+                    const std::shared_ptr<IObservable> notificationLifetime =
+                        AcquireNotificationLifetime();
                     const auto bucketIterator =
                         _buckets.find(std::type_index(typeid(ObserverType)));
                     if (bucketIterator == _buckets.end()) { return; }
@@ -138,15 +140,6 @@ namespace ESPressio {
                     BeginObservableDestruction();
                     _buckets.clear();
                     _registrations.clear();
-                }
-
-                /// Untyped registration cannot determine an Observer's interfaces.
-                /// Use RegisterObserverAs<ObserverInterfaces...>() instead.
-                IObserverHandle* RegisterObserver(IObserver* observer) override {
-                    if (observer == nullptr) {
-                        throw InvalidObserverRegistrationException();
-                    }
-                    throw ExplicitObserverInterfacesRequiredException();
                 }
 
                 template <class... ObserverInterfaces>

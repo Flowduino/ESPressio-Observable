@@ -12,6 +12,7 @@ namespace ESPressio {
 
     namespace Observable {
         class IObservable;
+        class IUntypedObservable;
         class Observable;
         class ObservableWithBuckets;
         class ObserverHandle;
@@ -31,13 +32,6 @@ namespace ESPressio {
             public:
                 InvalidObserverRegistrationException()
                     : ObserverRegistrationException("Cannot register a null Observer pointer") {}
-        };
-
-        class ExplicitObserverInterfacesRequiredException : public ObserverRegistrationException {
-            public:
-                ExplicitObserverInterfacesRequiredException()
-                    : ObserverRegistrationException(
-                        "ObservableWithBuckets requires RegisterObserverAs<ObserverInterfaces...>()") {}
         };
 
         class ObserverInterfaceMismatchException : public ObserverRegistrationException {
@@ -64,6 +58,13 @@ namespace ESPressio {
                 InvalidObservableHandleException()
                     : ObserverHandleException(
                         "Cannot construct an Observer Handle without a valid Observable lifetime") {}
+        };
+
+        class ObservableOwnershipException : public ObservableException {
+            public:
+                ObservableOwnershipException()
+                    : ObservableException(
+                        "Observable notifications require ownership by std::shared_ptr") {}
         };
 
         namespace Detail {
@@ -130,7 +131,7 @@ namespace ESPressio {
         };
     
         /// An `IObservable` is an object that can be observed by any number of `IObserver` descendant types
-        class IObservable {
+        class IObservable : public std::enable_shared_from_this<IObservable> {
             private:
                 friend class ObserverHandle;
                 std::shared_ptr<Detail::ObservableLifetimeControl> _lifetimeControl;
@@ -138,6 +139,17 @@ namespace ESPressio {
             protected:
                 std::shared_ptr<Detail::ObservableLifetimeControl> GetLifetimeControl() const {
                     return _lifetimeControl;
+                }
+
+                /// Derived notification entry points must retain the returned token
+                /// for their complete body. This safely defers destruction requested
+                /// by a callback until the outer notification method unwinds.
+                std::shared_ptr<IObservable> AcquireNotificationLifetime() {
+                    try {
+                        return shared_from_this();
+                    } catch (const std::bad_weak_ptr&) {
+                        throw ObservableOwnershipException();
+                    }
                 }
 
                 /// Any derived type whose state is used by registration methods must
@@ -159,12 +171,18 @@ namespace ESPressio {
                 virtual ~IObservable() {
                     BeginObservableDestruction();
                 }
-                /// Will Register the`IObserver` with this `IObservable`
-                virtual IObserverHandle* RegisterObserver(IObserver* observer) = 0;
                 /// Will Unregister the `IObserver` from this `IObservable`
                 virtual void UnregisterObserver(IObserver* observer) = 0;
                 /// Will return `true` if the `IObserver` is registered with this `IObservable`
                 virtual bool IsObserverRegistered(IObserver* observer) = 0;
+        };
+
+        /// Common interface for Observable implementations whose Observer
+        /// interfaces can be discovered automatically at notification time.
+        class IUntypedObservable : public IObservable {
+            public:
+                virtual ~IUntypedObservable() = default;
+                virtual IObserverHandle* RegisterObserver(IObserver* observer) = 0;
         };
 
     }

@@ -17,12 +17,14 @@ namespace ESPressio {
         /// THIS TYPE IS NOT THREAD-SAFE!
         /// Registering or Unregistering Observers while Observers are being notified can lead to undefined behavior.
         /// If you need a Thread-Safe Implementation, use the `ThreadSafeObservable` class instead.
-        class Observable : public IObservable {
+        class Observable : public IUntypedObservable {
             private:
                 std::vector<IObserverHandle*> _observers;
             protected:
                 /// Will call the `callback` for each Observer
                 void WithObservers(std::function<void(IObserver*)> callback) {
+                    const std::shared_ptr<IObservable> notificationLifetime =
+                        AcquireNotificationLifetime();
                     for (auto observer : _observers) {
                         callback(observer->GetObserver());
                     }
@@ -31,6 +33,8 @@ namespace ESPressio {
                 /// Will call the `callback` for each Observer that is of type `ObserverType`
                 template <class ObserverType>
                 void WithObservers(std::function<void(ObserverType*)> callback) {
+                    const std::shared_ptr<IObservable> notificationLifetime =
+                        AcquireNotificationLifetime();
                     for (auto observer : _observers) {
                         ObserverType* observerAsT = dynamic_cast<ObserverType*>(observer->GetObserver());
                         if (!observerAsT) { continue; }
