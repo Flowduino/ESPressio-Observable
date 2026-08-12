@@ -6,6 +6,14 @@ Provides a foundation for designing, structuring, and implementing your embedded
 ## Latest Stable Version
 The latest Stable Version is [2.0.0](https://github.com/Flowduino/ESPressio-Observable/releases/tag/2.0.0).
 
+## Compatibility
+
+ESPressio Observable is platform-neutral at the source level, but requires a modern C++ standard library with RTTI, mutexes, smart pointers, and STL containers. ESP32 is the primary supported target. Other capable Arduino targets—such as RP2040, SAMD, STM32, Renesas UNO R4, and Teensy—may be compatible when their selected core and toolchain provide those facilities.
+
+Classic AVR targets are not recommended because of limited RAM/flash and incomplete or unavailable threading-library support. Broad `architectures=*` and `platforms=*` manifest declarations mean that no processor-specific API is required; they do not guarantee that every Arduino toolchain implements the required C++ features.
+
+Compatibility is source-derived; non-ESP32 targets should be verified by compiling for the intended board and core.
+
 ## ESPressio Development Platform
 The **ESPressio** Development Platform is a collection of discrete (sometimes intra-connected) Component Libraries developed with a particular development ethos in mind.
 

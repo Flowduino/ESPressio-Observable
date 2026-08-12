@@ -1,6 +1,6 @@
 {
     "name": "ESPressio-Observable",
-    "description": "Observer-Pattern Library intended for use with all microcontrollers",
+    "description": "Observer-Pattern library for microcontrollers with modern C++ toolchains",
     "keywords": "observer,observable,observation,observer pattern,pattern,design pattern,callback,watcher,notifier,espressio",
     "authors": {
         "name": "Flowduino",
