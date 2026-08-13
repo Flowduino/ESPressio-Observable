@@ -4,7 +4,7 @@ Observer Pattern Components of the Flowduino ESPressio Development Platform
 Provides a foundation for designing, structuring, and implementing your embedded programs using Observer Pattern.
 
 ## Latest Stable Version
-The latest Stable Version is [2.0.0](https://github.com/Flowduino/ESPressio-Observable/releases/tag/2.0.0).
+The latest Stable Version is [3.0.0](https://github.com/Flowduino/ESPressio-Observable/releases/tag/3.0.0).
 
 ## Compatibility
 
@@ -55,7 +55,7 @@ You can quickly and easily add this library to your project in PlatformIO by sim
 
 ```ini
 lib_deps =
-    flowduino/ESPressio-Observable@^2.0.0
+    flowduino/ESPressio-Observable@^3.0.0
 ```
 
 Alternatively, if you want to use the bleeding-edge (effectively "Developer Integration Testing" or "DIT") sources, you can instead use:
@@ -236,7 +236,7 @@ So, our `ino` or `main.cpp` file will look something like this:
 
 std::shared_ptr<Thermometer> thermometer = std::make_shared<Thermometer>();
 TemperatureLogger temperatureLogger;
-IObserverHandle* observerHandle;
+ObserverHandlePtr observerHandle;
 
 void setup() {
     observerHandle = thermometer->RegisterObserver(&temperatureLogger); // Register our Observer with the Observable
@@ -249,7 +249,7 @@ void loop() {
 It really is as simple as that!
 
 `RegisterObserver` registers the given `Observer` with the `Observable` against which it is invoked.
-It returns an `IObserverHandle*` (pointer) reference which you should retain for the lifetime of your `Observer`. 
+It returns an owning `ObserverHandlePtr` (`std::unique_ptr<IObserverHandle>`) which you should retain for the lifetime of your `Observer`.
 
 Observers are held by non-owning pointer. The library never deletes an Observer and does not extend its lifetime. An Observer must therefore remain alive until its handle has been unregistered (or deleted) and that operation has completed. With `ThreadSafeObservable`, completion of `Unregister()` also waits for any notification currently using that Observer. With the non-thread-safe `Observable`, the caller must ensure that registration, notification, and destruction do not overlap.
 
@@ -257,7 +257,11 @@ Passing `nullptr` to `RegisterObserver` throws `InvalidObserverRegistrationExcep
 
 `IObservable` and `IObserverHandle` objects are intentionally non-copyable and non-movable. Pass them by reference or pointer; copying an observable or registration handle would allow multiple C++ objects to represent the same registration and invalidate one another's state.
 
-Version 2 Observable objects must be owned by `std::shared_ptr` before invoking a notification method. Every derived notification entry point must place its complete operation inside `ExecuteNotification()`, which retains ownership until that operation finishes. Construct Observables with `std::make_shared`. Attempting notification on an Observable that is not managed by `std::shared_ptr` throws `ObservableOwnershipException`.
+Observable objects must be owned by `std::shared_ptr` before invoking a notification method. Every derived notification entry point must place its complete operation inside `ExecuteNotification()`, which retains ownership until that operation finishes. Construct Observables with `std::make_shared`. Attempting notification on an Observable that is not managed by `std::shared_ptr` throws `ObservableOwnershipException`.
+
+Each Observer may have only one active registration per Observable. Attempting
+to register it again throws `DuplicateObserverRegistrationException`; this
+ensures that every registration has exactly one owning handle.
 
 > **CRITICAL OWNERSHIP REQUIREMENT:** Never invoke raw `delete` on an Observable and never create a second independent `shared_ptr` from its raw pointer. Release or reset the existing `shared_ptr` owner instead. C++ cannot prohibit raw deletion for every arbitrary derived type with a public destructor; violating this rule can cause double destruction and memory corruption.
 
@@ -275,12 +279,12 @@ Direct dispatch is available only through the `NotificationContext` supplied to 
 
 `IObservable` defines the common lifetime, unregistration, and registration-query contract. `IUntypedObservable` extends it with `RegisterObserver(IObserver*)` for `Observable` and `ThreadSafeObservable`. `ObservableWithBuckets` remains an `IObservable` and provides its type-safe `RegisterObserverAs<...>()` operation without exposing an untyped registration operation that cannot be implemented correctly.
 
-Invoking `delete observerHandle` will not only destroy the Observer Handle (freeing its memory), it will also unregister the `Observer` from the `Observable`.
+Destroying or resetting `observerHandle` unregisters the `Observer` from the `Observable` automatically.
 In the case of the above (simple) example, both the `Observer` and the `Observable` exist for the entire lifetime of execution, however - you can fully control the lifetimes in your applications.
 
 `IObserverHandle::GetObserver()` returns the registered, non-owning Observer pointer while the registration is active and returns `nullptr` once unregistration begins. Constructing an `ObserverHandle` directly without a valid Observable lifetime throws `InvalidObservableHandleException`, derived from `ObserverHandleException` and `ObservableException`.
 
-An Observer Handle may safely outlive its Observable. Internally, handles share a small lifetime-control object with the Observable, but the public API remains the non-owning `IObserverHandle*` API. Once Observable destruction begins, `GetObservable()` returns `nullptr` and deleting or unregistering a surviving handle is safe. The raw pointer returned by `GetObservable()` is only an immediate, non-owning observation and must not be retained or used concurrently with Observable destruction.
+An Observer Handle may safely outlive its Observable. Internally, handles share a small lifetime-control object with the Observable. Once Observable destruction begins, `GetObservable()` and `GetObserver()` return `nullptr`, and resetting or unregistering a surviving handle is safe. The raw pointer returned by `GetObservable()` is only an immediate, non-owning observation and must not be retained or used concurrently with Observable destruction.
 
 Any derived class whose own state is used by `RegisterObserver()`, `UnregisterObserver()`, or `IsObserverRegistered()` must call the protected `BeginObservableDestruction()` method at the beginning of its most-derived destructor, before destroying or locking that state. This includes classes derived from `Observable` or `ThreadSafeObservable` when they override those methods. The base destructor calls it again safely as a fallback, but that later call alone cannot protect state already destroyed by an earlier derived destructor.
 
@@ -359,7 +363,7 @@ MyDisplay display;
 std::shared_ptr<FastThermometer> thermometer =
     std::make_shared<FastThermometer>();
 
-IObserverHandle* displayHandle =
+ObserverHandlePtr displayHandle =
     thermometer->RegisterObserverAs<
         ITemperatureObserver,
         IAirPressureObserver,
@@ -502,8 +506,8 @@ Okay, we're almost done... now we need only modify our `.ino` or `main.cpp` impl
 std::shared_ptr<Thermometer> thermometer = std::make_shared<Thermometer>();
 TemperatureLogger temperatureLogger;
 AirPressureLogger airPressureLogger;
-IObserverHandle* temperatureObserverHandle; // We shall rename `observerHandle` to `temperatureObserverHandle` to avoid ambiguity.
-IObserverHandle* airPressureObserverHandle; // We add a new variable to hold the Air Pressure Observer's Handle.
+ObserverHandlePtr temperatureObserverHandle; // We shall rename `observerHandle` to `temperatureObserverHandle` to avoid ambiguity.
+ObserverHandlePtr airPressureObserverHandle; // We add a new variable to hold the Air Pressure Observer's Handle.
 
 void setup() {
     temperatureObserverHandle = thermometer->RegisterObserver(&temperatureLogger); // Register our Temperature Observer with the Observable

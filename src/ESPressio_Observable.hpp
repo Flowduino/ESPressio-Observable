@@ -4,6 +4,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include <algorithm>
 
 #include "ESPressio_IObservable.hpp"
 #include "ESPressio_IObserver.hpp"
@@ -16,25 +17,56 @@ namespace ESPressio {
         /// An `Observable` is an object that can be observed by any number of `IObserver` descendant types
         /// This is a concrete implementation of `IObservable`.
         /// THIS TYPE IS NOT THREAD-SAFE!
-        /// Registering or Unregistering Observers while Observers are being notified can lead to undefined behavior.
+        /// Observers may register or unregister during a callback, but calls
+        /// from multiple threads still require external synchronization.
         /// If you need a Thread-Safe Implementation, use the `ThreadSafeObservable` class instead.
         class Observable : public IUntypedObservable {
             private:
                 std::vector<IObserverHandle*> _observers;
+                std::size_t _notificationDepth = 0;
+                bool _needsCompaction = false;
 
-                void _withObservers(std::function<void(IObserver*)> callback) {
-                    for (auto observer : _observers) {
-                        callback(observer->GetObserver());
+                void _finishNotification() {
+                    if (--_notificationDepth == 0 && _needsCompaction) {
+                        _observers.erase(
+                            std::remove(_observers.begin(), _observers.end(), nullptr),
+                            _observers.end());
+                        _needsCompaction = false;
                     }
                 }
 
-                template <class ObserverType>
-                void _withObservers(std::function<void(ObserverType*)> callback) {
-                    for (auto observer : _observers) {
-                        ObserverType* observerAsT = dynamic_cast<ObserverType*>(observer->GetObserver());
-                        if (!observerAsT) { continue; }
-                        callback(observerAsT);
+                template <class Callback>
+                void _withObservers(Callback&& callback) {
+                    ++_notificationDepth;
+                    const std::size_t observerCount = _observers.size();
+                    try {
+                        for (std::size_t index = 0; index < observerCount; ++index) {
+                            IObserverHandle* handle = _observers[index];
+                            if (handle != nullptr) { callback(handle->GetObserver()); }
+                        }
+                    } catch (...) {
+                        _finishNotification();
+                        throw;
                     }
+                    _finishNotification();
+                }
+
+                template <class ObserverType, class Callback>
+                void _withObservers(Callback&& callback) {
+                    ++_notificationDepth;
+                    const std::size_t observerCount = _observers.size();
+                    try {
+                        for (std::size_t index = 0; index < observerCount; ++index) {
+                            IObserverHandle* handle = _observers[index];
+                            if (handle == nullptr) { continue; }
+                            ObserverType* observerAsT = dynamic_cast<ObserverType*>(handle->GetObserver());
+                            if (observerAsT != nullptr) { callback(observerAsT); }
+                        }
+                    } catch (...) {
+                        _finishNotification();
+                        throw;
+                    }
+                    _finishNotification();
                 }
 
             protected:
@@ -50,13 +82,16 @@ namespace ESPressio {
                               _notificationLifetime(std::move(notificationLifetime)) {}
 
                     public:
-                        void WithObservers(std::function<void(IObserver*)> callback) {
-                            _observable._withObservers(std::move(callback));
+                        template <class Callback>
+                        void WithObservers(Callback&& callback) {
+                            _observable._withObservers(
+                                std::forward<Callback>(callback));
                         }
 
-                        template <class ObserverType>
-                        void WithObservers(std::function<void(ObserverType*)> callback) {
-                            _observable._withObservers<ObserverType>(std::move(callback));
+                        template <class ObserverType, class Callback>
+                        void WithObservers(Callback&& callback) {
+                            _observable._withObservers<ObserverType>(
+                                std::forward<Callback>(callback));
                         }
                 };
 
@@ -72,29 +107,39 @@ namespace ESPressio {
             public:
                 ~Observable() override {
                     BeginObservableDestruction();
+                    for (IObserverHandle* handle : _observers) {
+                        if (handle != nullptr) {
+                            static_cast<ObserverHandle*>(handle)->InvalidateRegistration();
+                        }
+                    }
                     _observers.clear();
                 }
 
-                IObserverHandle* RegisterObserver(IObserver* observer) override {
+                ObserverHandlePtr RegisterObserver(IObserver* observer) override {
                     if (observer == nullptr) {
                         throw InvalidObserverRegistrationException();
                     }
                     for (auto thisObserver : _observers) {
-                        if (thisObserver->GetObserver() == observer) { return thisObserver; }
+                        if (thisObserver != nullptr && thisObserver->GetObserver() == observer) {
+                            throw DuplicateObserverRegistrationException();
+                        }
                     }
                     std::unique_ptr<ObserverHandle> handle(
                         new ObserverHandle(GetLifetimeControl(), observer));
-                    ObserverHandle* result = handle.get();
-                    _observers.push_back(result);
-                    handle.release();
-                    return result;
+                    _observers.push_back(handle.get());
+                    return ObserverHandlePtr(handle.release());
                 }
 
                 void UnregisterObserver(IObserver* observer) override {
                     for (auto thisObserver = _observers.begin(); thisObserver != _observers.end(); thisObserver++) {
                         if ((*thisObserver)->GetObserver() == observer) {
                             static_cast<ObserverHandle*>((*thisObserver))->InvalidateRegistration();
-                            _observers.erase(thisObserver);
+                            if (_notificationDepth > 0) {
+                                *thisObserver = nullptr;
+                                _needsCompaction = true;
+                            } else {
+                                _observers.erase(thisObserver);
+                            }
                             return;
                         }
                     }

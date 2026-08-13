@@ -51,6 +51,34 @@ namespace ESPressio {
 
                 std::unordered_map<std::type_index, Bucket> _buckets;
                 std::unordered_map<IObserver*, Registration> _registrations;
+                std::size_t _notificationDepth = 0;
+                bool _needsCompaction = false;
+
+                void _compactBuckets() {
+                    for (auto bucketIterator = _buckets.begin();
+                            bucketIterator != _buckets.end();) {
+                        Bucket& bucket = bucketIterator->second;
+                        bucket.erase(
+                            std::remove_if(
+                                bucket.begin(), bucket.end(),
+                                [](const BucketEntry& entry) {
+                                    return entry.handle == nullptr;
+                                }),
+                            bucket.end());
+                        if (bucket.empty()) {
+                            bucketIterator = _buckets.erase(bucketIterator);
+                        } else {
+                            ++bucketIterator;
+                        }
+                    }
+                    _needsCompaction = false;
+                }
+
+                void _finishNotification() {
+                    if (--_notificationDepth == 0 && _needsCompaction) {
+                        _compactBuckets();
+                    }
+                }
 
                 static bool _containsInterface(
                     const std::vector<std::type_index>& interfaces,
@@ -103,17 +131,25 @@ namespace ESPressio {
                         if (bucketIterator == _buckets.end()) { continue; }
 
                         Bucket& bucket = bucketIterator->second;
-                        bucket.erase(
-                            std::remove_if(
-                                bucket.begin(), bucket.end(),
-                                [&registration](const BucketEntry& entry) {
-                                    return entry.handle == registration.handle;
+                        if (_notificationDepth > 0) {
+                            for (BucketEntry& entry : bucket) {
+                                if (entry.handle == registration.handle) {
+                                    entry.handle = nullptr;
+                                    entry.observerInterface = nullptr;
+                                    _needsCompaction = true;
                                 }
-                            ),
-                            bucket.end()
-                        );
+                            }
+                        } else {
+                            bucket.erase(
+                                std::remove_if(
+                                    bucket.begin(), bucket.end(),
+                                    [&registration](const BucketEntry& entry) {
+                                        return entry.handle == registration.handle;
+                                    }),
+                                bucket.end());
+                        }
 
-                        if (bucket.empty()) {
+                        if (_notificationDepth == 0 && bucket.empty()) {
                             _buckets.erase(bucketIterator);
                         }
                     }
@@ -126,9 +162,21 @@ namespace ESPressio {
                         _buckets.find(std::type_index(typeid(ObserverType)));
                     if (bucketIterator == _buckets.end()) { return; }
 
-                    for (const BucketEntry& entry : bucketIterator->second) {
-                        callback(static_cast<ObserverType*>(entry.observerInterface));
+                    ++_notificationDepth;
+                    Bucket& bucket = bucketIterator->second;
+                    const std::size_t observerCount = bucket.size();
+                    try {
+                        for (std::size_t index = 0; index < observerCount; ++index) {
+                            const BucketEntry& entry = bucket[index];
+                            if (entry.handle != nullptr) {
+                                callback(static_cast<ObserverType*>(entry.observerInterface));
+                            }
+                        }
+                    } catch (...) {
+                        _finishNotification();
+                        throw;
                     }
+                    _finishNotification();
                 }
 
             protected:
@@ -161,12 +209,15 @@ namespace ESPressio {
             public:
                 ~ObservableWithBuckets() override {
                     BeginObservableDestruction();
+                    for (auto& registration : _registrations) {
+                        registration.second.handle->InvalidateRegistration();
+                    }
                     _buckets.clear();
                     _registrations.clear();
                 }
 
                 template <class... ObserverInterfaces>
-                IObserverHandle* RegisterObserverAs(IObserver* observer) {
+                ObserverHandlePtr RegisterObserverAs(IObserver* observer) {
                     static_assert(
                         sizeof...(ObserverInterfaces) > 0,
                         "At least one Observer interface must be specified"
@@ -209,7 +260,7 @@ namespace ESPressio {
                         if (!_sameInterfaces(existing->second.interfaces, interfaceTypes)) {
                             throw ObserverRegistrationConflictException();
                         }
-                        return existing->second.handle;
+                        throw DuplicateObserverRegistrationException();
                     }
 
                     std::unique_ptr<ObserverHandle> handle(
@@ -236,8 +287,7 @@ namespace ESPressio {
                         throw;
                     }
 
-                    handle.release();
-                    return result;
+                    return ObserverHandlePtr(handle.release());
                 }
 
                 void UnregisterObserver(IObserver* observer) override {

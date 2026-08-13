@@ -5,6 +5,7 @@
 #include <mutex>
 #include <utility>
 #include <vector>
+#include <algorithm>
 
 #include "ESPressio_IObservable.hpp"
 #include "ESPressio_IObserver.hpp"
@@ -21,52 +22,61 @@ namespace ESPressio {
             private:
                 std::vector<IObserverHandle*> _observers;
                 std::recursive_mutex _mutex;
+                std::size_t _notificationDepth = 0;
+                bool _needsCompaction = false;
 
                 bool _isObserverRegistered(IObserver* observer) const {
                     for (IObserverHandle* handle : _observers) {
-                        if (handle->GetObserver() == observer) {
+                        if (handle != nullptr && handle->GetObserver() == observer) {
                             return true;
                         }
                     }
                     return false;
                 }
 
-                std::vector<IObserver*> _copyObserverPointers() const {
-                    std::vector<IObserver*> observers;
-                    observers.reserve(_observers.size());
-
-                    for (IObserverHandle* handle : _observers) {
-                        observers.push_back(handle->GetObserver());
+                void _finishNotification() {
+                    if (--_notificationDepth == 0 && _needsCompaction) {
+                        _observers.erase(
+                            std::remove(_observers.begin(), _observers.end(), nullptr),
+                            _observers.end());
+                        _needsCompaction = false;
                     }
-
-                    return observers;
                 }
 
-                void _withObservers(std::function<void(IObserver*)> callback) {
+                template <class Callback>
+                void _withObservers(Callback&& callback) {
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
-                    const std::vector<IObserver*> observers =
-                        _copyObserverPointers();
-
-                    for (IObserver* observer : observers) {
-                        if (_isObserverRegistered(observer)) {
-                            callback(observer);
+                    ++_notificationDepth;
+                    const std::size_t observerCount = _observers.size();
+                    try {
+                        for (std::size_t index = 0; index < observerCount; ++index) {
+                            IObserverHandle* handle = _observers[index];
+                            if (handle != nullptr) { callback(handle->GetObserver()); }
                         }
+                    } catch (...) {
+                        _finishNotification();
+                        throw;
                     }
+                    _finishNotification();
                 }
 
-                template <class ObserverType>
-                void _withObservers(std::function<void(ObserverType*)> callback) {
+                template <class ObserverType, class Callback>
+                void _withObservers(Callback&& callback) {
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
-                    const std::vector<IObserver*> observers =
-                        _copyObserverPointers();
-
-                    for (IObserver* observer : observers) {
-                        if (!_isObserverRegistered(observer)) { continue; }
-                        ObserverType* observerAsT =
-                            dynamic_cast<ObserverType*>(observer);
-                        if (!observerAsT) { continue; }
-                        callback(observerAsT);
+                    ++_notificationDepth;
+                    const std::size_t observerCount = _observers.size();
+                    try {
+                        for (std::size_t index = 0; index < observerCount; ++index) {
+                            IObserverHandle* handle = _observers[index];
+                            if (handle == nullptr) { continue; }
+                            ObserverType* observerAsT = dynamic_cast<ObserverType*>(handle->GetObserver());
+                            if (observerAsT != nullptr) { callback(observerAsT); }
+                        }
+                    } catch (...) {
+                        _finishNotification();
+                        throw;
                     }
+                    _finishNotification();
                 }
 
             protected:
@@ -82,13 +92,16 @@ namespace ESPressio {
                               _notificationLifetime(std::move(notificationLifetime)) {}
 
                     public:
-                        void WithObservers(std::function<void(IObserver*)> callback) {
-                            _observable._withObservers(std::move(callback));
+                        template <class Callback>
+                        void WithObservers(Callback&& callback) {
+                            _observable._withObservers(
+                                std::forward<Callback>(callback));
                         }
 
-                        template <class ObserverType>
-                        void WithObservers(std::function<void(ObserverType*)> callback) {
-                            _observable._withObservers<ObserverType>(std::move(callback));
+                        template <class ObserverType, class Callback>
+                        void WithObservers(Callback&& callback) {
+                            _observable._withObservers<ObserverType>(
+                                std::forward<Callback>(callback));
                         }
                 };
 
@@ -102,25 +115,29 @@ namespace ESPressio {
                 ~ThreadSafeObservable() override {
                     BeginObservableDestruction();
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
+                    for (IObserverHandle* handle : _observers) {
+                        if (handle != nullptr) {
+                            static_cast<ObserverHandle*>(handle)->InvalidateRegistration();
+                        }
+                    }
                     _observers.clear();
                 }
 
-                IObserverHandle* RegisterObserver(IObserver* observer) override {
+                ObserverHandlePtr RegisterObserver(IObserver* observer) override {
                     if (observer == nullptr) {
                         throw InvalidObserverRegistrationException();
                     }
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
                     for (auto thisObserver : _observers) {
-                        if (thisObserver->GetObserver() == observer) {
-                            return thisObserver;
+                        if (thisObserver != nullptr &&
+                            thisObserver->GetObserver() == observer) {
+                            throw DuplicateObserverRegistrationException();
                         }
                     }
                     std::unique_ptr<ObserverHandle> handle(
                         new ObserverHandle(GetLifetimeControl(), observer));
-                    ObserverHandle* result = handle.get();
-                    _observers.push_back(result);
-                    handle.release();
-                    return result;
+                    _observers.push_back(handle.get());
+                    return ObserverHandlePtr(handle.release());
                 }
 
                 void UnregisterObserver(IObserver* observer) override {
@@ -128,7 +145,12 @@ namespace ESPressio {
                     for (auto thisObserver = _observers.begin(); thisObserver != _observers.end(); thisObserver++) {
                         if ((*thisObserver)->GetObserver() == observer) {
                             static_cast<ObserverHandle*>((*thisObserver))->InvalidateRegistration();
-                            _observers.erase(thisObserver);
+                            if (_notificationDepth > 0) {
+                                *thisObserver = nullptr;
+                                _needsCompaction = true;
+                            } else {
+                                _observers.erase(thisObserver);
+                            }
                             return;
                         }
                     }

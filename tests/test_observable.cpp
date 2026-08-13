@@ -26,6 +26,9 @@ static_assert(std::is_base_of<ObserverRegistrationException,
 static_assert(std::is_base_of<ObserverRegistrationException,
     ObserverRegistrationConflictException>::value,
     "Registration conflicts must be registration exceptions");
+static_assert(std::is_base_of<ObserverRegistrationException,
+    DuplicateObserverRegistrationException>::value,
+    "Duplicate registrations must be registration exceptions");
 static_assert(std::is_base_of<ObservableException, ObserverHandleException>::value,
     "Handle exceptions must be Observable exceptions");
 static_assert(std::is_base_of<ObserverHandleException,
@@ -89,6 +92,15 @@ namespace {
     };
 
     struct PlainObserver final : IObserver {};
+
+    struct SelfRemovingObserver final : IObserver, InterfaceA {
+        ObserverHandlePtr* handle = nullptr;
+        int calls = 0;
+        void OnA(int) override {
+            ++calls;
+            if (handle != nullptr) { handle->reset(); }
+        }
+    };
 
     class TestObservable final : public Observable {
         public:
@@ -195,10 +207,12 @@ namespace {
         catch (const InvalidObserverRegistrationException&) { nullThrown = true; }
         assert(nullThrown);
 
-        IObserverHandle* handleA = observable->RegisterObserver(&observerA);
-        IObserverHandle* duplicate = observable->RegisterObserver(&observerA);
-        IObserverHandle* plainHandle = observable->RegisterObserver(&plain);
-        assert(handleA == duplicate);
+        ObserverHandlePtr handleA = observable->RegisterObserver(&observerA);
+        bool duplicateThrown = false;
+        try { observable->RegisterObserver(&observerA); }
+        catch (const DuplicateObserverRegistrationException&) { duplicateThrown = true; }
+        assert(duplicateThrown);
+        ObserverHandlePtr plainHandle = observable->RegisterObserver(&plain);
         assert(handleA->GetObservable() == observable.get());
         assert(handleA->GetObserver() == &observerA);
         assert(observable->IsObserverRegistered(&observerA));
@@ -215,13 +229,13 @@ namespace {
         assert(!observable->IsObserverRegistered(&plain));
         assert(plainHandle->GetObserver() == nullptr);
         assert(plainHandle->GetObservable() == nullptr);
-        delete plainHandle;
+        plainHandle.reset();
 
         handleA->Unregister();
         handleA->Unregister();
         assert(!observable->IsObserverRegistered(&observerA));
         assert(handleA->GetObserver() == nullptr);
-        delete handleA;
+        handleA.reset();
     }
 
     void TestObservableExceptionsAndOwnership() {
@@ -233,7 +247,7 @@ namespace {
 
         auto observable = std::make_shared<TestObservable>();
         PlainObserver observer;
-        IObserverHandle* handle = observable->RegisterObserver(&observer);
+        ObserverHandlePtr handle = observable->RegisterObserver(&observer);
         bool callbackThrown = false;
         try {
             observable->NotifyAll([](IObserver*) {
@@ -242,13 +256,13 @@ namespace {
         } catch (const std::runtime_error&) { callbackThrown = true; }
         assert(callbackThrown);
         assert(observable->IsObserverRegistered(&observer));
-        delete handle;
+        handle.reset();
     }
 
     void TestSharedNotificationLifetime() {
         auto observable = std::make_shared<TestObservable>();
         PlainObserver observer;
-        IObserverHandle* handle = observable->RegisterObserver(&observer);
+        ObserverHandlePtr handle = observable->RegisterObserver(&observer);
         bool operationCompleted = false;
         std::weak_ptr<TestObservable> weakObservable = observable;
 
@@ -260,12 +274,12 @@ namespace {
         assert(operationCompleted);
         assert(weakObservable.expired());
         assert(handle->GetObservable() == nullptr);
-        delete handle;
+        handle.reset();
     }
 
     void TestHandleOutlivesObservable() {
         PlainObserver observer;
-        IObserverHandle* handle = nullptr;
+        ObserverHandlePtr handle;
         {
             auto observable = std::make_shared<TestObservable>();
             handle = observable->RegisterObserver(&observer);
@@ -273,13 +287,13 @@ namespace {
         assert(handle->GetObservable() == nullptr);
         handle->Unregister();
         assert(handle->GetObserver() == nullptr);
-        delete handle;
+        handle.reset();
     }
 
     void TestUnregisterExceptionRestoresHandle() {
         auto observable = std::make_shared<ThrowingUnregisterObservable>();
         PlainObserver observer;
-        IObserverHandle* handle = observable->RegisterObserver(&observer);
+        ObserverHandlePtr handle = observable->RegisterObserver(&observer);
         bool thrown = false;
         try { handle->Unregister(); }
         catch (const std::runtime_error&) { thrown = true; }
@@ -288,14 +302,14 @@ namespace {
         assert(handle->GetObserver() == &observer);
         assert(observable->IsObserverRegistered(&observer));
         observable->throwOnUnregister = false;
-        delete handle;
+        handle.reset();
         assert(!observable->IsObserverRegistered(&observer));
     }
 
     void TestRetainedNotificationContext() {
         auto observable = std::make_shared<TestObservable>();
         ObserverA observer;
-        IObserverHandle* handle = observable->RegisterObserver(&observer);
+        ObserverHandlePtr handle = observable->RegisterObserver(&observer);
         std::weak_ptr<TestObservable> weakObservable = observable;
         std::function<void(int)> deferred = observable->DeferredNotifyA();
         observable.reset();
@@ -304,7 +318,7 @@ namespace {
         assert(observer.calls == 1 && observer.value == 91);
         deferred = std::function<void(int)>();
         assert(weakObservable.expired());
-        delete handle;
+        handle.reset();
     }
 
     void TestThreadSafeReentrancyAndExceptions() {
@@ -312,22 +326,24 @@ namespace {
         PlainObserver first;
         PlainObserver second;
         PlainObserver third;
-        IObserverHandle* firstHandle = observable->RegisterObserver(&first);
-        IObserverHandle* secondHandle = observable->RegisterObserver(&second);
-        IObserverHandle* thirdHandle = nullptr;
+        ObserverHandlePtr firstHandle = observable->RegisterObserver(&first);
+        ObserverHandlePtr secondHandle = observable->RegisterObserver(&second);
+        ObserverHandlePtr thirdHandle;
         int calls = 0;
 
         bool nullThrown = false;
         try { observable->RegisterObserver(nullptr); }
         catch (const InvalidObserverRegistrationException&) { nullThrown = true; }
         assert(nullThrown);
-        assert(firstHandle == observable->RegisterObserver(&first));
+        bool duplicateThrown = false;
+        try { observable->RegisterObserver(&first); }
+        catch (const DuplicateObserverRegistrationException&) { duplicateThrown = true; }
+        assert(duplicateThrown);
 
         observable->NotifyAll([&](IObserver* observer) {
             ++calls;
             if (observer == &first) {
-                delete secondHandle;
-                secondHandle = nullptr;
+                secondHandle.reset();
                 thirdHandle = observable->RegisterObserver(&third);
             }
         });
@@ -348,28 +364,28 @@ namespace {
         assert(callbackThrown);
         assert(observable->IsObserverRegistered(&first));
 
-        delete firstHandle;
-        delete thirdHandle;
+        firstHandle.reset();
+        thirdHandle.reset();
     }
 
     void TestThreadSafeTypedFiltering() {
         auto observable = std::make_shared<TestThreadSafeObservable>();
         ObserverA observerA;
         PlainObserver plain;
-        IObserverHandle* handleA = observable->RegisterObserver(&observerA);
-        IObserverHandle* plainHandle = observable->RegisterObserver(&plain);
+        ObserverHandlePtr handleA = observable->RegisterObserver(&observerA);
+        ObserverHandlePtr plainHandle = observable->RegisterObserver(&plain);
         observable->NotifyA(73);
         assert(observerA.calls == 1 && observerA.value == 73);
         observable->UnregisterObserver(nullptr);
         assert(!observable->IsObserverRegistered(nullptr));
-        delete handleA;
-        delete plainHandle;
+        handleA.reset();
+        plainHandle.reset();
     }
 
     void TestThreadSafeConcurrentUnregister() {
         auto observable = std::make_shared<TestThreadSafeObservable>();
         PlainObserver observer;
-        IObserverHandle* handle = observable->RegisterObserver(&observer);
+        ObserverHandlePtr handle = observable->RegisterObserver(&observer);
         std::atomic<bool> callbackEntered{false};
         std::atomic<bool> releaseCallback{false};
         std::atomic<bool> unregisterFinished{false};
@@ -393,13 +409,13 @@ namespace {
         unregisterer.join();
         assert(unregisterFinished.load());
         assert(!observable->IsObserverRegistered(&observer));
-        delete handle;
+        handle.reset();
     }
 
     void TestThreadSafeStress() {
         auto observable = std::make_shared<TestThreadSafeObservable>();
         ObserverA observer;
-        IObserverHandle* handle = observable->RegisterObserver(&observer);
+        ObserverHandlePtr handle = observable->RegisterObserver(&observer);
         std::atomic<bool> stop{false};
 
         std::thread notifier([&]() {
@@ -414,18 +430,18 @@ namespace {
         reader.join();
         notifier.join();
         handle->Unregister();
-        delete handle;
+        handle.reset();
     }
 
     void TestConcurrentHandleAndObservableDestruction() {
         for (int iteration = 0; iteration < 250; ++iteration) {
             PlainObserver observer;
             auto observable = std::make_shared<TestThreadSafeObservable>();
-            IObserverHandle* handle = observable->RegisterObserver(&observer);
+            ObserverHandlePtr handle = observable->RegisterObserver(&observer);
             std::atomic<bool> start{false};
-            std::thread destroyHandle([&]() {
+            std::thread destroyHandle([&start, handle = std::move(handle)]() mutable {
                 while (!start.load()) { std::this_thread::yield(); }
-                delete handle;
+                handle.reset();
             });
             std::thread destroyObservable([&]() {
                 while (!start.load()) { std::this_thread::yield(); }
@@ -452,10 +468,12 @@ namespace {
         assert(mismatchThrown);
         assert(!observable->IsObserverRegistered(&observer));
 
-        IObserverHandle* handle =
+        ObserverHandlePtr handle =
             observable->RegisterObserverAs<InterfaceA, InterfaceB, InterfaceA>(&observer);
-        assert((handle ==
-            observable->RegisterObserverAs<InterfaceB, InterfaceA>(&observer)));
+        bool duplicateThrown = false;
+        try { observable->RegisterObserverAs<InterfaceB, InterfaceA>(&observer); }
+        catch (const DuplicateObserverRegistrationException&) { duplicateThrown = true; }
+        assert(duplicateThrown);
         assert(observable->IsObserverRegistered(&observer));
         observable->NotifyA(12);
         observable->NotifyB(34);
@@ -474,33 +492,58 @@ namespace {
         assert(handle->GetObserver() == nullptr);
         observable->NotifyA(56);
         assert(observer.callsA == 1);
-        delete handle;
+        handle.reset();
 
         ObserverA observerA;
-        IObserverHandle* handleA = observable->RegisterObserverAs<InterfaceA>(&observerA);
+        ObserverHandlePtr handleA = observable->RegisterObserverAs<InterfaceA>(&observerA);
         handleA->Unregister();
         handleA->Unregister();
         assert(!observable->IsObserverRegistered(&observerA));
-        delete handleA;
+        handleA.reset();
     }
 
     void TestBucketExceptionsAndOwnership() {
         auto observable = std::make_shared<TestBucketObservable>();
         ObserverA observer;
-        IObserverHandle* handle = observable->RegisterObserverAs<InterfaceA>(&observer);
+        ObserverHandlePtr handle = observable->RegisterObserverAs<InterfaceA>(&observer);
         bool callbackThrown = false;
         try {
             observable->NotifyThrow();
         } catch (const std::runtime_error&) { callbackThrown = true; }
         assert(callbackThrown);
         assert(observable->IsObserverRegistered(&observer));
-        delete handle;
+        handle.reset();
 
         TestBucketObservable unmanaged;
         bool ownershipThrown = false;
         try { unmanaged.NotifyA(1); }
         catch (const ObservableOwnershipException&) { ownershipThrown = true; }
         assert(ownershipThrown);
+    }
+
+    void TestMutationDuringNotification() {
+        {
+            auto observable = std::make_shared<TestObservable>();
+            SelfRemovingObserver observer;
+            ObserverHandlePtr handle = observable->RegisterObserver(&observer);
+            observer.handle = &handle;
+            observable->NotifyA(1);
+            observable->NotifyA(2);
+            assert(observer.calls == 1);
+            assert(!observable->IsObserverRegistered(&observer));
+        }
+
+        {
+            auto observable = std::make_shared<TestBucketObservable>();
+            SelfRemovingObserver observer;
+            ObserverHandlePtr handle =
+                observable->RegisterObserverAs<InterfaceA>(&observer);
+            observer.handle = &handle;
+            observable->NotifyA(1);
+            observable->NotifyA(2);
+            assert(observer.calls == 1);
+            assert(!observable->IsObserverRegistered(&observer));
+        }
     }
 
 }
@@ -519,4 +562,5 @@ int main() {
     TestConcurrentHandleAndObservableDestruction();
     TestBucketRegistrationAndDispatch();
     TestBucketExceptionsAndOwnership();
+    TestMutationDuringNotification();
 }

@@ -48,6 +48,13 @@ namespace ESPressio {
                         "Observer is already registered with a different interface set") {}
         };
 
+        class DuplicateObserverRegistrationException : public ObserverRegistrationException {
+            public:
+                DuplicateObserverRegistrationException()
+                    : ObserverRegistrationException(
+                        "Observer is already registered with this Observable") {}
+        };
+
         class ObserverHandleException : public ObservableException {
             public:
                 using ObservableException::ObservableException;
@@ -129,6 +136,8 @@ namespace ESPressio {
                 /// or nullptr after unregistration has begun.
                 virtual IObserver* GetObserver() = 0;
         };
+
+        using ObserverHandlePtr = std::unique_ptr<IObserverHandle>;
     
         /// An `IObservable` is an object that can be observed by any number of `IObserver` descendant types
         class IObservable : public std::enable_shared_from_this<IObservable> {
@@ -185,7 +194,7 @@ namespace ESPressio {
         class IUntypedObservable : public IObservable {
             public:
                 virtual ~IUntypedObservable() = default;
-                virtual IObserverHandle* RegisterObserver(IObserver* observer) = 0;
+                virtual ObserverHandlePtr RegisterObserver(IObserver* observer) = 0;
         };
 
     }
