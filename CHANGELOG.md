@@ -12,7 +12,23 @@ Versioning](https://semver.org/).
 > had little or no release-note detail, the entry is intentionally terse
 > rather than inferring unsupported intent.
 
-## \[3.0.0\] - 2026-08-13
+## [3.0.1] - 2026-08-20
+
+### Changed
+
+-   Added an atomic Observer-count fast path to `ThreadSafeObservable`.
+-   Notifications now return immediately when no Observers are registered,
+    avoiding the notification mutex and notification-lifetime `shared_ptr`
+    acquisition on the zero-Observer production path.
+-   Preserved the Observable 3.0 registration, mutation-during-notification,
+    exception and RAII handle semantics.
+
+### Fixed
+
+-   Corrected stale `component.mk` compile-time version metadata that still
+    identified the library as 2.0.0.
+
+## [3.0.0] - 2026-08-13
 
 ### Changed
 
@@ -29,7 +45,7 @@ Versioning](https://semver.org/).
 -   Corrected Observer-registration lifetime hazards during
     callback/notification mutation.
 
-## \[2.0.0\]
+## [2.0.0]
 
 ### Changed
 
@@ -38,7 +54,7 @@ Versioning](https://semver.org/).
 -   Standardised the common `IObserver`-based synchronous observation
     contract.
 
-## \[1.x\]
+## [1.x]
 
 ### Added
 
