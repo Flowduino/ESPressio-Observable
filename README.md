@@ -5,7 +5,19 @@ Development Platform.
 
 ## Latest Stable Version
 
-**3.0.0**
+**3.0.1**
+
+### 3.0.1 performance maintenance
+
+Version 3.0.1 preserves the Observable 3.0 public API and ownership-safe
+registration model while reducing the cost of optional observability when no
+Observers are registered.
+
+`ThreadSafeObservable` now maintains a lightweight atomic Observer count so
+`ExecuteNotification()` can return immediately without taking the notification
+mutex or acquiring a notification-lifetime `shared_ptr` when there are no
+Observers. Registration, unregistration, mutation-during-notification and RAII
+handle semantics are unchanged.
 
 ## ESPressio Development Platform
 
