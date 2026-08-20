@@ -1,11 +1,12 @@
 #pragma once
 
+#include <algorithm>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <utility>
 #include <vector>
-#include <algorithm>
 
 #include "ESPressio_IObservable.hpp"
 #include "ESPressio_IObserver.hpp"
@@ -22,6 +23,7 @@ namespace ESPressio {
             private:
                 std::vector<IObserverHandle*> _observers;
                 std::recursive_mutex _mutex;
+                std::atomic<std::size_t> _observerCount{0};
                 std::size_t _notificationDepth = 0;
                 bool _needsCompaction = false;
 
@@ -51,7 +53,9 @@ namespace ESPressio {
                     try {
                         for (std::size_t index = 0; index < observerCount; ++index) {
                             IObserverHandle* handle = _observers[index];
-                            if (handle != nullptr) { callback(handle->GetObserver()); }
+                            if (handle != nullptr) {
+                                callback(handle->GetObserver());
+                            }
                         }
                     } catch (...) {
                         _finishNotification();
@@ -68,9 +72,14 @@ namespace ESPressio {
                     try {
                         for (std::size_t index = 0; index < observerCount; ++index) {
                             IObserverHandle* handle = _observers[index];
-                            if (handle == nullptr) { continue; }
-                            ObserverType* observerAsT = dynamic_cast<ObserverType*>(handle->GetObserver());
-                            if (observerAsT != nullptr) { callback(observerAsT); }
+                            if (handle == nullptr) {
+                                continue;
+                            }
+                            ObserverType* observerAsT =
+                                dynamic_cast<ObserverType*>(handle->GetObserver());
+                            if (observerAsT != nullptr) {
+                                callback(observerAsT);
+                            }
                         }
                     } catch (...) {
                         _finishNotification();
@@ -107,10 +116,29 @@ namespace ESPressio {
 
                 template <class Operation>
                 void ExecuteNotification(Operation&& operation) {
+                    /*
+                     * Notifications are intentionally very cheap when no observers
+                     * are registered. The relaxed/acquire atomic read avoids taking
+                     * the recursive mutex and avoids acquiring a notification-lifetime
+                     * shared_ptr on the overwhelmingly common production fast path.
+                     *
+                     * A concurrently registering observer is not required to observe
+                     * a notification that had already begun before registration.
+                     */
+                    if (
+                        _observerCount.load(
+                            std::memory_order_acquire
+                        ) == 0
+                    ) {
+                        return;
+                    }
+
                     NotificationContext context(
-                        *this, AcquireNotificationLifetime());
+                        *this,
+                        AcquireNotificationLifetime());
                     operation(context);
                 }
+
             public:
                 ~ThreadSafeObservable() override {
                     BeginObservableDestruction();
@@ -121,6 +149,7 @@ namespace ESPressio {
                         }
                     }
                     _observers.clear();
+                    _observerCount.store(0, std::memory_order_release);
                 }
 
                 ObserverHandlePtr RegisterObserver(IObserver* observer) override {
@@ -137,26 +166,52 @@ namespace ESPressio {
                     std::unique_ptr<ObserverHandle> handle(
                         new ObserverHandle(GetLifetimeControl(), observer));
                     _observers.push_back(handle.get());
+                    _observerCount.fetch_add(1, std::memory_order_release);
                     return ObserverHandlePtr(handle.release());
                 }
 
                 void UnregisterObserver(IObserver* observer) override {
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
-                    for (auto thisObserver = _observers.begin(); thisObserver != _observers.end(); thisObserver++) {
-                        if ((*thisObserver)->GetObserver() == observer) {
-                            static_cast<ObserverHandle*>((*thisObserver))->InvalidateRegistration();
-                            if (_notificationDepth > 0) {
-                                *thisObserver = nullptr;
-                                _needsCompaction = true;
-                            } else {
-                                _observers.erase(thisObserver);
-                            }
-                            return;
+                    for (
+                        auto thisObserver = _observers.begin();
+                        thisObserver != _observers.end();
+                        ++thisObserver
+                    ) {
+                        if (
+                            *thisObserver == nullptr ||
+                            (*thisObserver)->GetObserver() != observer
+                        ) {
+                            continue;
                         }
+
+                        static_cast<ObserverHandle*>(
+                            *thisObserver
+                        )->InvalidateRegistration();
+
+                        _observerCount.fetch_sub(
+                            1,
+                            std::memory_order_acq_rel
+                        );
+
+                        if (_notificationDepth > 0) {
+                            *thisObserver = nullptr;
+                            _needsCompaction = true;
+                        } else {
+                            _observers.erase(thisObserver);
+                        }
+                        return;
                     }
                 }
 
                 bool IsObserverRegistered(IObserver* observer) override {
+                    if (
+                        _observerCount.load(
+                            std::memory_order_acquire
+                        ) == 0
+                    ) {
+                        return false;
+                    }
+
                     std::lock_guard<std::recursive_mutex> lock(_mutex);
                     return _isObserverRegistered(observer);
                 }
