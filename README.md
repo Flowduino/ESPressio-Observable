@@ -344,6 +344,56 @@ The current implementation deliberately supports an Observer unregistering while
 
 This makes patterns such as one-shot observers practical without invalidating the iteration currently delivering a notification.
 
+## `ObservableWithBuckets`: faster typed dispatch
+
+`ObservableWithBuckets` is a non-thread-safe alternative for applications that repeatedly notify specific Observer interfaces and want to avoid a `dynamic_cast` for every Observer on every notification.
+
+Unlike `Observable`, the interface set is declared at registration time:
+
+```cpp
+#include <ESPressio_ObservableWithBuckets.hpp>
+
+class Sensor :
+    public ESPressio::Observable::ObservableWithBuckets {
+public:
+    void NotifyTemperature(float value) {
+        ExecuteNotification([&](NotificationContext& notification) {
+            notification.WithObservers<ITemperatureObserver>(
+                [&](ITemperatureObserver* observer) {
+                    observer->OnTemperatureChanged(value, value);
+                }
+            );
+        });
+    }
+};
+
+auto sensor = std::make_shared<Sensor>();
+TemperatureLogger logger;
+
+auto handle = sensor->RegisterObserverAs<ITemperatureObserver>(
+    &logger
+);
+```
+
+An Observer implementing several interfaces can register all of them in one operation:
+
+```cpp
+auto handle = sensor->RegisterObserverAs<
+    ITemperatureObserver,
+    IAirPressureObserver
+>(&environmentDisplay);
+```
+
+The library validates each requested interface when registering and stores the resolved interface pointer in a type-specific bucket. Later `WithObservers<T>()` calls therefore iterate only the relevant bucket.
+
+Use `ObservableWithBuckets` when:
+
+- notification frequency is high enough that repeated RTTI filtering matters;
+- Observer interface sets are known when registering; and
+- the Observable does not require concurrent thread-safe registration/notification.
+
+Registration remains ownership-safe and uses the same `ObserverHandlePtr` lifetime model. Registering the same Observer again with a different interface set is rejected rather than silently changing its contract.
+
 ## Observable vs Event
 
 Use Observable when the notification is synchronous and naturally belongs to the operation being performed:
