@@ -3,13 +3,13 @@
     "description": "Observer-Pattern library for microcontrollers with modern C++ toolchains",
     "keywords": "observer,observable,observation,observer pattern,pattern,design pattern,callback,watcher,notifier,espressio",
     "authors": {
-        "name": "Flowduino",
+        "name": "Simon J. Stuart",
         "maintainer": true,
-        "url": "https://flowduino.com"
+        "url": "https://espressio.org"
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/Flowduino/ESPressio-Observable.git"
+        "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git"
     },
     "version": "3.0.1",
     "license": "Apache-2.0",
