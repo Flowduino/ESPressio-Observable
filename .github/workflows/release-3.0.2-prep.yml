@@ -1,0 +1,42 @@
+name: Prepare 3.0.2 release
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.head_ref == 'release/14-3.0.2-repository-relocation' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/14-3.0.2-repository-relocation
+      - name: Update release documentation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('README.md'); t=p.read_text(); t=t.replace('**3.0.1**','**3.0.2**',1); t=t.replace('Version 3.0.1 preserves the Observable 3.0 ownership-safe registration API while reducing the cost of the no-observer path in `ThreadSafeObservable`.','Version 3.0.2 is the repository-relocation patch release for the ESPressio-Development-Platform organization. It preserves the Observable 3.0 ownership-safe registration API and runtime behaviour.'); t=t.replace('espressio-development-platform/ESPressio-Observable@^3.0.1','espressio-development-platform/ESPressio-Observable@^3.0.2'); p.write_text(t)
+          p=Path('CHANGELOG.md'); t=p.read_text(); marker='## [3.0.1]'; entry='''## [3.0.2] - 2026-08-22\n\n### Changed\n\n- Published the post-migration package generation from the dedicated `ESPressio-Development-Platform` GitHub organization.\n- Updated package identity and documentation to use `https://espressio.org` and the relocated repository coordinates directly.\n\n### Compatibility\n\n- No public API or runtime behaviour changes.\n- Establishes Observable 3.0.2 as the migrated baseline for downstream ESPressio releases.\n\n''';
+          if '## [3.0.2]' not in t: t=t.replace(marker,entry+marker,1); p.write_text(t)
+          p=Path('ESPRESSIO_DEPENDENCY_CHART.md'); t=p.read_text().replace('Observable    3.0.1','Observable    3.0.2',1).replace('Observable 3.0.1\n    -> none','Observable 3.0.2\n    -> none',1); p.write_text(t)
+          p=Path('ESPRESSIO_DEPENDENCY_CHART.svg'); t=p.read_text().replace('Observable 3.0.1','Observable 3.0.2',1); p.write_text(t)
+          PY
+      - name: Validate release metadata
+        run: |
+          grep -q '"version": "3.0.2"' library.json
+          grep -q '^version=3.0.2$' library.properties
+          grep -q 'ESPressio-Observable@^3.0.2' README.md
+          grep -q '^## \[3.0.2\]' CHANGELOG.md
+      - name: Commit release preparation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md CHANGELOG.md ESPRESSIO_DEPENDENCY_CHART.md ESPRESSIO_DEPENDENCY_CHART.svg
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Prepare Observable 3.0.2 release documentation (#14)'
+          git push
