@@ -10,7 +10,7 @@ This document is the canonical snapshot of the current released ESPressio depend
 ## Released generation
 
 ```text
-Observable    3.0.1
+Observable    3.0.2
 Serializable  0.10.2
 Units         0.2.3
 Timing        2.2.4
@@ -26,7 +26,7 @@ Serial        0.7.2
 ## Required dependencies
 
 ```text
-Observable 3.0.1
+Observable 3.0.2
     -> none
 
 Serializable 0.10.2

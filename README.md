@@ -6,9 +6,9 @@ ESPressio Observable provides small, reusable building blocks for one-to-many sy
 
 ## Latest Stable Version
 
-**3.0.1**
+**3.0.2**
 
-Version 3.0.1 preserves the Observable 3.0 ownership-safe registration API while reducing the cost of the no-observer path in `ThreadSafeObservable`.
+Version 3.0.2 is the repository-relocation patch release for the ESPressio-Development-Platform organization. It preserves the Observable 3.0 ownership-safe registration API and runtime behaviour.
 
 ## Why use ESPressio Observable?
 
@@ -89,7 +89,7 @@ PlatformIO:
 
 ```ini
 lib_deps =
-    espressio-development-platform/ESPressio-Observable@^3.0.1
+    espressio-development-platform/ESPressio-Observable@^3.0.2
 ```
 
 Or, when intentionally tracking the latest development branch:

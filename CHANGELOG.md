@@ -12,6 +12,18 @@ Versioning](https://semver.org/).
 > had little or no release-note detail, the entry is intentionally terse
 > rather than inferring unsupported intent.
 
+## [3.0.2] - 2026-08-22
+
+### Changed
+
+- Published the post-migration package generation from the dedicated `ESPressio-Development-Platform` GitHub organization.
+- Updated package identity and documentation to use `https://espressio.org` and the relocated repository coordinates directly.
+
+### Compatibility
+
+- No public API or runtime behaviour changes.
+- Establishes Observable 3.0.2 as the migrated baseline for downstream ESPressio releases.
+
 ## [3.0.1] - 2026-08-20
 
 ### Changed
