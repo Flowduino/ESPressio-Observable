@@ -1,6 +1,6 @@
 # ESPressio Observable
 
-Synchronous Observer Pattern components for the Flowduino ESPressio Development Platform.
+Synchronous Observer Pattern components for the ESPressio Development Platform.
 
 ESPressio Observable provides small, reusable building blocks for one-to-many synchronous notification without forcing an Observable object to know which concrete consumers are listening to it.
 
@@ -60,6 +60,8 @@ ESPressio is a collection of discrete, composable component libraries built arou
 - **Object-oriented** — a type for everything, and everything in a type.
 - **SOLID** — favour focused responsibilities, extensibility, substitutable abstractions, narrow interfaces, and dependency inversion wherever practical on embedded C++ platforms.
 
+Project website: [espressio.org](https://espressio.org).
+
 ## License
 
 Licensed under the **Apache License 2.0**. See [LICENSE](LICENSE).
@@ -87,14 +89,14 @@ PlatformIO:
 
 ```ini
 lib_deps =
-    flowduino/ESPressio-Observable@^3.0.1
+    espressio-development-platform/ESPressio-Observable@^3.0.1
 ```
 
 Or, when intentionally tracking the latest development branch:
 
 ```ini
 lib_deps =
-    https://github.com/Flowduino/ESPressio-Observable.git
+    https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git
 ```
 
 The library requires C++ RTTI because notification filtering uses `dynamic_cast` against Observer interfaces. If your toolchain disables RTTI by default, enable it for the application, for example:
